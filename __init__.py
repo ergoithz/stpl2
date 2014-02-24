@@ -3,8 +3,20 @@
 
 
 import re
+import sys
+import zlib
 import collections
-import __builtin__ as builtin
+
+# Py3k fixes
+try:
+    import __builtin__ as builtins
+except ImportError:
+    import builtins
+
+try:
+    iteritems = dict.iteritems
+except AttributeError:
+    iteritems = dict.items
 
 
 class TemplateSyntaxError(SyntaxError):
@@ -19,7 +31,18 @@ class CodeTranslator(object):
     '''
     Translate from SimpleTemplateLanguage to Python code.
 
-    Lines starting with % are evaluated as inline code
+    Rules:
+        Lines starting with '%' are translated to python code.
+        Lines starting with '% end' decrement indentation level.
+        Code blocks starts with '<%', and ends with '%>'.
+        Substitution variables starts with '{{', and ends with '}}'.
+
+    Features:
+        Readable and well indented code output.
+        Lines containing only a code block start and/or ending are collapsed.
+        Keyword 'pass' is omitted when unnecessary.
+        Keyword 'pass' is automaticaly predicted for non-block code.
+        Multiple lines are collapsed into a single yield.
 
     '''
     tab = "    "
@@ -32,17 +55,14 @@ class CodeTranslator(object):
 
     indent_tokens = {"class", "def", "with", "if", "for", "while", "block"}
     redent_tokens = {"else", "elif", "except", "finally"}
-    custom_tokens = {"block", "end", "extends", "include"}
+    custom_tokens = {"block", "block.super", "end", "extends", "include"}
 
     def __init__(self):
         # Compile regexps
-        rb = "(?P<%s>(^%s(\s|\(|$)))"
-        rj = "(\s|\(|$))|(^".join
-        self.re_tokens = re.compile("|".join((
-            rb % ("indent", rj(self.indent_tokens)),
-            rb % ("redent", rj(self.redent_tokens)),
-            rb % ("custom", rj(self.custom_tokens)),
-            )))
+        indent = "((?P<indent>(%s)).*)" % "|".join(self.indent_tokens)
+        redent = "((?P<redent>(%s)).*)" % "|".join(self.redent_tokens)
+        custom = "((?P<custom>(%s))\s*(\((?P<func_params>.+)\))?\s*)" % "|".join(self.custom_tokens)
+        self.re_tokens = re.compile("^(%s)$" % "|".join((indent, redent, custom)))
         self.re_var = re.compile("%s(.*)%s" % (self.variable_open, self.variable_close))
 
     def re_var_sub(self, match):
@@ -50,72 +70,79 @@ class CodeTranslator(object):
         return "%s"
 
     def parse_token_params(self, params):
-        if params.startswith("(") and params.endswith(")"):
-            args = params.split("=", 1)[0].rsplit(",")[0][1:]
-            kwargs =    1
-            args = eval(")")
-
-    def parse_token(self, line):
-        '''
-        Parses custom token.
-
-        :param basestring line: line containing token
-        :return tuple: tuple as (token, argument tuple, keyword argument dict).
-        '''
-        line = line.strip()
-        sep = len(line)
-        for i in "( ":
-            index = line.find(i)
-            if -1 < index < sep:
-                sep = index
-        args, kwargs = self.parse_token_params(line[sep:])
-        return line[:sep], args, kwargs
+        if params and params.startswith("(") and params.endswith(")"):
+            return eval("(lambda *args, **kwargs: args, kwargs)%s" % params)
+        return (), {}
 
     @property
     def indent(self):
         return self.tab * self.level
 
+    def escape_string_py3(self, data):
+        return repr(data)[2 if isinstance(data, bytes) else 1:-1]
+
+    def escape_string_py2(self, data):
+        return data.encode("unicode-escaped")
+
+    escape_string = escape_string_py2 if sys.version_info.major == 2 else escape_string_py3
+    unicode_prefix = "u" if sys.version_info.major == 2 else ""
+
+    def translate_token_end(self, params=None):
+        if not self.level_touched:
+            yield self.indent + "pass"
+        self.level -= 1
+        self.level_touched = True # level already touched by indent token
+        if self.level < self.minlevel:
+            if self.block_stack:
+                # level below minimum cos we're ending current block
+                self.level, name = self.block_stack.pop()
+            else:
+                # prevent writing lines at module level
+                raise TemplateSyntaxError("Unmatching 'end' token on line %d" % self.linenum)
+
+    def translate_token_extends(self, params=None):
+        # extends is managed by template context
+        if self.level > self.minlevel:
+            raise TemplateSyntaxError("Token 'extends' must be outside any block (line %d)." % self.linenum)
+        elif not self.extends is None:
+            raise TemplateSyntaxError("Token 'extends' cannot be defined twice (line %d)." % self.linenum)
+        name = lstripped.split(" ", 1)[1].strip()
+        self.extends = self.strip_str(name)
+
+    def translate_token_block(self, params=None):
+        # yield from block
+        name = lstripped.split(" ", 1)[1].strip()
+        yield self.indent + "for line in __blocks__[%r]():" % name
+        self.level += 1
+        yield self.indent + "yield line"
+        # start putting lines on new block
+        self.block_stack.append((self.level, name))
+        self.level = self.minlevel
+        self.level_touched = False
+
+    def translate_token_block_super(self, params=None):
+        if not self.block_stack:
+            raise TemplateSyntaxError("Token 'block.super' outside any block (line %d)" % self.linenum)
+        name = self.block_stack[-1][1]
+        yield self.indent + "for line in __parent_blocks__[%r]():" % name
+        self.level += 1
+        yield self.indent + "yield line"
+        self.level -= 1
+
+    def translate_token_include(self, params=None):
+        args, kwargs = self.parse_token_params(params)
+
     def translate_code_line(self, data):
         # Code line
         lstripped = data[self.code_line_prefix_length:].lstrip()
         group = self.re_tokens.match(lstripped).groupdict()
-        if group["custom"]:
-            token = group["custom"]
-            if token == "end":
-                if not self.level_touched:
-                    yield self.indent + "pass"
-                self.level -= 1
-                self.level_touched = True # level already touched by indent token
-                if self.level < self.minlevel:
-                    if self.block_stack:
-                        # level below minimum cos we're ending current block
-                        self.level, name = self.block_stack.pop()
-                    else:
-                        # prevent writing lines at module level
-                        raise TemplateSyntaxError("Unmatching 'end' token on line %d" % self.linenum)
-            elif token == "extends":
-                # extends is managed by template context
-                if self.level > self.minlevel:
-                    raise TemplateSyntaxError("Token 'extends' must be outside any block (line %d)." % self.linenum)
-                elif not self.extends is None:
-                    raise TemplateSyntaxError("Token 'extends' cannot be defined twice (line %d)." % self.linenum)
-                name = lstripped.split(" ", 1)[1].strip()
-                self.extends = self.strip_str(name)
-            elif token == "block":
-                # yield from block
-                name = lstripped.split(" ", 1)[1].strip()
-                yield self.indent + "for line in __blocks__[%r]():" % name
-                self.level += 1
-                yield self.indent + "yield line"
-                # start putting lines on new block
-                self.block_stack.append((self.level, name))
-                self.level = self.minlevel
-                self.level_touched = False
-            elif token == "include":
-                yield
-        elif group["redent"]:
+        if group['custom']:
+            method = 'translate_token_%s' % group['custom'].replace('.', '_')
+            for line in getattr(self, method)(group['func_params']):
+                yield line
+        elif group['redent']:
             if not self.level_touched:
-                yield self.indent + "pass"
+                yield self.indent + 'pass'
             self.level -= 1
             yield self.indent + lstripped
             self.level += 1
@@ -123,38 +150,35 @@ class CodeTranslator(object):
         else:
             if lstripped.strip():
                 yield self.indent + lstripped
-            if group["indent"]:
+            if group['indent']:
                 self.level += 1
                 self.level_touched = False
 
     def translate_string_line(self, data):
-        # Template line
-        self.level_touched = True
+        # String
         if data.strip():
-            data = self.re_var.sub(self.re_var_sub, data).encode("string-escape")
+            data = self.re_var.sub(self.re_var_sub, data.replace("%", "%%"))
+            data = self.escape_string(data)
             trail = "" if self.inline else self.linesep_escaped
-            if self.string_vars:
-                tuple_indent = self.tab * (self.level + len(data) + 4)
-                sep = ",%s%s" % (self.linesep, tuple_indent)
-                extra = " %% (%s)" % sep.join(self.string_vars)
-                del self.string_vars[:] # clear
-            else:
-                extra = ""
-            yield "%syield \"%s%s\"%s" % (self.indent, data, trail, extra)
+            for i in self.string_start():
+                yield i
+            yield "%s%s\"%s%s\"" % (self.indent, self.unicode_prefix, data, trail)
         elif not self.inline:
-            yield "%syield \"%s%s\"" % (self.indent, data, self.linesep_escaped)
+            for i in self.string_start():
+                yield i
+            yield "%s%s\"%s%s\"" % (self.indent, self.unicode_prefix, data, self.linesep_escaped)
 
     def translate_literal_line(self, data):
         template_data = None
         if self.literal_close in data:
             data, template_data = data.split(self.literal_close, 1)
-        if data.strip():
-            if self.base is None:
-                self.base = len(data) - len(data.lstrip())
+        if self.base is None and data.strip():
+            self.base = len(data) - len(data.lstrip())
+        # Remove unnecessary 'pass' commands
+        if not self.level_touched or data.strip() != "pass":
+            for line in self.string_finish():
+                yield line
             yield self.indent + data[self.base:]
-        else:
-            # Empty lines for text literals
-            yield ""
         if not template_data is None:
             # Reset
             self.base = None
@@ -162,11 +186,34 @@ class CodeTranslator(object):
             # Switch to template mode
             self.translate_line = self.translate_template_line
             if template_data.strip():
-                yield "%syield \"%s\"" % (self.indent, " " * self.previous_indent)
+                for i in self.string_start():
+                    yield i
+                if self.previous_indent:
+                    yield "%su\"%s\"" % (self.indent, " " * self.previous_indent)
                 for line in self.translate_line(template_data):
                     yield line
-            elif self.previous_code:
-                yield "%syield \"%s\"" % (self.indent, self.linesep_escaped)
+            elif self.previous_string:
+                for i in self.string_start():
+                    yield i
+                yield "%su\"%s\"" % (self.indent, self.linesep_escaped)
+
+    def string_start(self):
+        if self.first_string_line:
+            self.level_touched = True
+            self.first_string_line = False
+            yield self.indent + "yield ("
+            self.level += 1
+
+    def string_finish(self):
+        if not self.first_string_line:
+            self.level_touched = True
+            self.first_string_line = True
+            if self.string_vars:
+                yield "%s) %% (%s)" % (self.indent, ",".join(self.string_vars))
+                del self.string_vars[:]
+            else:
+                yield "%s)" % self.indent
+            self.level -= 1
 
     def translate_template_line(self, data):
         literal_data = None
@@ -175,16 +222,18 @@ class CodeTranslator(object):
             self.inline = True
         lstripped = data.lstrip()
         if lstripped.startswith(self.code_line_prefix):
-            self.previous_code = False
+            for line in self.string_finish():
+                yield line
+            self.previous_string = False
             for line in self.translate_code_line(lstripped):
                 yield line
         else:
             if self.inline:
                 if data.strip():
-                    self.previous_code = True
+                    self.previous_string = True
                     self.previous_indent = 0
                 else:
-                    self.previous_code = False
+                    self.previous_string = False
                     self.previous_indent = len(data) - len(lstripped)
             for line in self.translate_string_line(data):
                 yield line
@@ -197,6 +246,9 @@ class CodeTranslator(object):
     def translate_code(self, data, optimize=False):
         # Initial state
         self.inline = False # if True will skip linesep to string lines
+        self.first_string_line = True
+        self.unfinished_token = False
+
         self.base = None
         self.level = self.minlevel = 1
         self.translate_line = self.translate_template_line
@@ -205,9 +257,10 @@ class CodeTranslator(object):
         self.block_stack = [] # list of block levels as (base, name)
         self.block_content = collections.defaultdict()
         self.level_touched = False
+
         # Optimizations
         self.code_line_prefix_length = len(self.code_line_prefix)
-        self.linesep_escaped = self.linesep.encode("string-escape")
+        self.linesep_escaped = self.escape_string(self.linesep)
         self.optimize = optimize
         # Yield lines
         yield "# -*- coding: UTF-8 -*-%s" % self.linesep
@@ -219,9 +272,13 @@ class CodeTranslator(object):
                     self.block_content[block_name].append(part + self.linesep)
                     continue
                 yield part + self.linesep
+        for line in self.string_finish():
+            yield line + self.linesep
+        del self.string_vars[:]
         # Yield blocks
+        yield "__parent_blocks__ = {}%s" % self.linesep
         yield "__blocks__ = {}%s" % self.linesep
-        for name, lines in self.block_content.iteritems():
+        for name, lines in iteritems(self.block_content):
             yield "def __block__():%s" % self.linesep
             for line in lines:
                 yield line + self.linesep
@@ -247,9 +304,11 @@ class TemplateContext(object):
             if self.manager is None:
                 raise TemplateContextError("TemplateContext's extends requires manager to be passed.")
             self._parent = self.manager.get_template_context(name)
+            self.parent_blocks = self._parent.blocks.copy()
             self._parent.blocks.update(self.blocks)
         else:
             self._parent = None
+            self.parent_blocks.clear()
 
     @property
     def manager(self):
@@ -269,6 +328,8 @@ class TemplateContext(object):
         self.pool = pool
         self.manager = manager
         self.namespace = {}
+
+        self.parent_blocks = {}
 
         eval(code, self.namespace)
         self.template = self.namespace["__template__"]
@@ -297,10 +358,13 @@ class TemplateContext(object):
         if self.parent:
             self.parent.reset()
         self.namespace.clear()
-        self.namespace.update(builtin.__dict__)
+        self.namespace.update(builtins.__dict__)
         self.namespace.update({
-            "__blocks__": self.blocks,
+            # Inheritance vars
             "__include__": self.include,
+            "__blocks__": self.blocks,
+            "__parent_blocks__": self.parent_blocks,
+            # Global functions
             "defined": self.namespace.__contains__,
             "get": self.namespace.get,
             "setdefault": self.namespace.setdefault,
@@ -326,14 +390,14 @@ class Template(object):
 
     @code.setter
     def code(self, v):
+        pycode = "".join(self.translate_class().translate_code(v))
         self._code = v
-        self._pycode = "".join(self.translate_class().translate_code(v))
-        print self._pycode
-        self._pycompiled = compile(self._pycode, self.filename or "<template>", "exec")
+        self._pycode = zlib.compress(pycode.encode("utf-8"))
+        self._pycompiled = compile(pycode, self.filename or "<template>", "exec")
 
     @property
     def pycode(self):
-        return self._pycode
+        return zlib.decompress(self._pycode).decode("utf-8")
 
     @property
     def pycompiled(self):

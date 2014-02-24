@@ -3,8 +3,10 @@
 
 import unittest
 
-from . import Template, CodeTranslator
+from . import Template, CodeTranslator, builtins
 
+if not hasattr(builtins, "xrange"):
+    xrange = range
 
 class TemplateTests(unittest.TestCase):
     def setUp(self):
@@ -15,7 +17,9 @@ class TemplateTests(unittest.TestCase):
         return compile(pycode, "test.py", "exec")
 
     def execute(self, code, env=None):
-        for pack in Template(code).render(env):
+        template = Template(code)
+        print(template.pycode)
+        for pack in template.render(env):
             for line in pack.splitlines():
                 yield line
 
@@ -25,7 +29,7 @@ class TemplateTests(unittest.TestCase):
     def testCompilation(self):
         self.validate_syntax('''
             <ul>
-                % for i in xrange(10):
+                % for i in range(10):
                 <li>{{ i }}</li>
                 % end
             </ul>
@@ -33,25 +37,31 @@ class TemplateTests(unittest.TestCase):
 
     def testNamespace(self):
         indent = "            "
-        data = self.execute('''
+        data = list(self.execute('''
             {{ var1 }}
             {{ get("var2", 2) }}
             <ul>
-                % for i in xrange(10):
+                % for i in range(10):
                 <li>{{ i }}</li>
                 % end
             </ul>
             <%
-                a = sum(xrange(100))
-                a /= 2
+                a = sum(range(100))
+                a = int(a/2)
             %>
+            <% pass %>
+            <% pass %>
             a<% pass %>
             <% pass %>b
             a<% pass %>b
-            {{ a }}
-            ''', {"var1":1})
-        data = list(data)
-        print data
+            <%# Comment %>
+            <% """
+            Multiline comment
+            """%>
+            a<% yield "b" %>c
+            a{{ a }}b
+            100%
+            ''', {"var1":1}))
         self.assertEqual(
             data,
            ["",
@@ -63,7 +73,9 @@ class TemplateTests(unittest.TestCase):
             indent+"a",
             indent+"b",
             indent+"ab",
-            indent+"2475",
+            indent+"abc",
+            indent+"a2475b",
+            indent+"100%",
             indent])
 
     def testSyntax(self):
