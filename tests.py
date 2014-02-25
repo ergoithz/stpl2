@@ -170,6 +170,13 @@ class TestTemplateManager(unittest.TestCase):
              ""])
 
 
+class TestTokenParameters(unittest.TestCase):
+    def testParam(self):
+        args = CodeTranslator.parse_token_params("(1,2,3,4,k=1,w=2)")
+        self.assertEqual(args, ((1,2,3,4),{"k":1, "w":2}))
+        args = CodeTranslator.parse_token_params("this is \"just a test\"")
+        self.assertEqual(args, (["this", "is", "just a test"], {}))
+
 
 if __name__ == "__main__":
     unittest.main()

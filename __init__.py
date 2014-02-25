@@ -7,7 +7,6 @@ import sys
 import zlib
 import argparse
 import collections
-import shlex
 import os
 import os.path
 
@@ -43,30 +42,6 @@ class TemplateContextError(ValueError):
 
 class TemplateNotFoundError(base_notfounderror):
     pass
-
-
-class TokenParameters(shlex.shlex):
-    whitespace = ","
-
-    def itokens(self):
-        token = parser.get_token()
-        while not token is None:
-            yield token
-            token = parser.get_token()
-
-    @classmethod
-    def split(cls, data):
-        if data.startswith("(") and data.endswith("("):
-            data = data[1:-1]
-        args = []
-        kwargs = {}
-        for part in cls(data, None, True).itokens():
-            if "=":
-                key, value = part.split("=", 1)
-                kwargs[key] = value
-            else:
-                args.append(part)
-        return args, kwargs
 
 
 class CodeTranslator(object):
@@ -120,12 +95,35 @@ class CodeTranslator(object):
         params = params.strip() if params else ""
         if params:
             if params.startswith("(") and params.endswith(")"):
-                return TokenParameters.split(params)
+                return eval("(lambda *args, **kwargs: (args,kwargs))%s" % params)
             elif " " in params:
-                return shlex.split(params), {}
-            else:
-                return (params, ), {}
-        return (), {}
+                args = [""]
+                escaped = False
+                stringchar = None
+                for char in params:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif stringchar:
+                        if char == stringchar:
+                            stringchar=None
+                            continue
+                    elif char == "\"" or char == "'":
+                        stringchar = char
+                        continue
+                    elif char == " ":
+                        if args[-1] != "":
+                            args.append("")
+                        continue
+                    args[-1] += char
+                if args[-1] == "":
+                    args = args[:-1]
+                return args, {}
+            elif params[0] == params[1] and params[0] in "\"'":
+                params = params[1:-1]
+            return [params], {}
+        return [], {}
 
     @property
     def indent(self):
