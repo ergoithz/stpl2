@@ -133,11 +133,11 @@ class TestBufferingTemplate(TestTemplateBase):
             "ab" * int(buffersize) + "\n" +
             "c" * int(buffersize) + "\n"
             )
-        self.assertEqual(len(data.next()), buffersize)
-        self.assertEqual(len(data.next()), buffersize)
-        self.assertEqual(len(data.next()), buffersize)
-        self.assertEqual(len(data.next()), 2) # linesep excess
-        self.assertRaises(StopIteration, data.next)
+        self.assertEqual(len(next(data)), buffersize)
+        self.assertEqual(len(next(data)), buffersize)
+        self.assertEqual(len(next(data)), buffersize)
+        self.assertEqual(len(next(data)), 2) # linesep excess
+        self.assertRaises(StopIteration, next, data)
 
 
 class TestTemplateManager(unittest.TestCase):

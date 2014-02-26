@@ -17,6 +17,7 @@ if py3k:
     unicode_prefix = ''
     base_notfounderror = FileNotFoundError
     yield_from_supported = sys.version_info.minor > 2
+    maxint = sys.maxsize
 
     def escape_string(data):
         return data.encode('unicode_escape').decode('ascii')
@@ -26,6 +27,7 @@ else:
     unicode_prefix = 'u'
     base_notfounderror = IOError
     yield_from_supported = False
+    maxint = sys.maxint
 
     def escape_string(data):
         return data.encode("unicode_escape")
@@ -78,9 +80,9 @@ class CodeTranslator(object):
     variable_close = "}}"
     code_line_prefix = "%"
 
-    indent_tokens = {"class", "def", "with", "if", "for", "while"}
-    redent_tokens = {"else", "elif", "except", "finally"}
-    custom_tokens = {"block", "block.super", "end", "extends", "include"}
+    indent_tokens = ("class", "def", "with", "if", "for", "while")
+    redent_tokens = ("else", "elif", "except", "finally")
+    custom_tokens = ("block", "block.super", "end", "extends", "include")
 
     def __init__(self):
         '''
@@ -100,7 +102,7 @@ class CodeTranslator(object):
     @classmethod
     def param_split(cls, params, seps, valuesep, strip, quote='\'"',
                     must_quote=False, escape='\\', free_escape=False,
-                    maxnum=sys.maxint):
+                    maxnum=maxint):
         '''
         Split a param string based on rules and return a  tuple with arguments,
         keyword arguments and unparsed data (see `maxnum` argument).
@@ -151,10 +153,12 @@ class CodeTranslator(object):
         extra = params[p+1:]
         for i in strip:
             extra = extra.strip(i)
-        return map("".join, args), dict((k, "".join(v)) for k, v in iteritems(kwargs)), extra
+        args = ["".join(i) for i in args]
+        kwargs = dict((k, "".join(v)) for k, v in iteritems(kwargs))
+        return args, kwargs, extra
 
     @classmethod
-    def token_params(cls, params, maxnum=sys.maxint):
+    def token_params(cls, params, maxnum=maxint):
         '''
         Parse custom token params detecting the correct parsing configuration
         for :py:method:param_split.
