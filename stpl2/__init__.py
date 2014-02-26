@@ -1,7 +1,6 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
 
-
 import re
 import sys
 import zlib
@@ -50,7 +49,7 @@ class TemplateValueError(ValueError):
 
 class CodeTranslator(object):
     '''
-    Translate from SimpleTemplateLanguage2 syntax to Python code.
+    Translate from SimpleTemplate Engine 2 syntax to Python code.
 
     Rules
     ~~~~~
@@ -262,7 +261,7 @@ class CodeTranslator(object):
         Declare that current template is based on given one.
         '''
         # extends is managed by template context
-        if self.level > self.minlevel:
+        if self.level > self.minlevel or self.block_stack:
             raise TemplateSyntaxError("Token 'extends' must be outside any block (line %d)." % self.linenum)
         elif not self.extends is None:
             raise TemplateSyntaxError("Token 'extends' cannot be defined twice (line %d)." % self.linenum)
@@ -512,6 +511,18 @@ class TemplateContext(object):
             return self.parent.template
         return self.owned_template
 
+    @property
+    def parentmost(self):
+        if self.parent:
+            return self.parent.parentmost or self.parent
+        return None
+
+    @property
+    def childmost(self):
+        if self.child:
+            return self.child.childmost or self.child
+        return None
+
     def iter_ancestors(self):
         '''
         Iterate over ancestors as in (self, parentmost].
@@ -529,20 +540,6 @@ class TemplateContext(object):
         while descendant:
             yield descendant
             descendant = descendant.child
-
-    def reversed_iter_descendants(self):
-        '''
-        Iterate over descendats as in [childmost, self).
-        '''
-        childmost = None
-        for childmost in self.iter_descendants():
-            pass
-        if childmost:
-            yield childmost
-            for child_ancestor in childmost.iter_ancestors():
-                if child_ancestor is self:
-                    break
-                yield child_ancestor
 
     def __init__(self, code, pool, manager=None):
         '''
@@ -590,12 +587,15 @@ class TemplateContext(object):
         return self.local_block_class(self, name)
 
     def block(self, name, **environ):
-        context = self if name in self.blocks else None
-        for child in self.reversed_iter_descendants():
-            if name in child.blocks:
-                context = child
-                break
-        if not context is None:
+        child = self.childmost or self
+        if name in child.blocks:
+            context = child
+        else:
+            for child in child.iter_ancestors():
+                if name in child.blocks:
+                    context = child
+                    break
+        if context:
             context.reset()
             context.update(environ)
             for line in context.blocks[name](context.get_local_block(name)):
@@ -607,7 +607,7 @@ class TemplateContext(object):
             if name in parent.blocks:
                 context = parent
                 break
-        if not context is None:
+        if context:
             context.reset()
             context.update(environ)
             for line in context.blocks[name](context.get_local_block(name)):
@@ -716,6 +716,9 @@ class TemplateManager(object):
         self.templates = {}
 
     def get_template(self, name):
+        '''
+        Get template object from given name.
+        '''
         if not name in self.templates:
             template_path = None
             for directory in self.directories:
@@ -738,20 +741,18 @@ class TemplateManager(object):
         return self.templates[name]
 
     def get_template_context(self, name):
+        '''
+        Get template context corresponding to template with given name.
+        '''
         return self.get_template(name).template_context()
 
-    def render_template(self, template, env=None):
-        if isinstance(template, Template):
-            if not template.filename in self.templates:
-                template.manager = self
-                self.templates[template.filename] = template
-        elif template in self.templates:
-            template = self.templates[template.filename]
-        else:
-            with open(template) as f:
-                template = Template(f.read(), template, manager=self)
-                self.templates[template.filename] = template
-        return template.render(env)
+    def render_template(self, name, env=None):
+        '''
+        Render template corresponding
+        '''
+        template = self.get_template(name)
+        for line in template.render(env):
+            yield line
 
     def reset(self):
         '''

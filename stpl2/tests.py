@@ -37,7 +37,10 @@ class TestCodeTranslator(unittest.TestCase):
             % if False: # comment
 
             % elif '#':
+            % elif False:
 
+            % end
+            % if True:
             % end
             '''.strip())
 
@@ -46,6 +49,13 @@ class TestCodeTranslator(unittest.TestCase):
         for code in templates:
             generator = self.translator.translate_code(code)
             self.assertRaises(TemplateValueError, "".join, generator)
+        templates = ("% end", "% block a\n% extends test\n% end",
+                     "% if True:\n% extends test\n% end",
+                     "% extends 1\n% extends 2", "% block.super",
+                     )
+        for code in templates:
+            generator = self.translator.translate_code(code)
+            self.assertRaises(TemplateSyntaxError, "".join, generator)
 
     def testTokenParams(self):
         args = CodeTranslator.token_params('(1, 2, 3, 4, k=1, w=2)', 3)
@@ -80,6 +90,8 @@ class TestTemplate(TestTemplateBase):
                 a = sum(range(100))
                 a = int(a/2)
             %>
+            a<%
+            %>b
             <% pass %>
             <% pass %>
             a<% pass %>
@@ -103,6 +115,7 @@ class TestTemplate(TestTemplateBase):
             indent+'<ul>',
            ] + [indent+'    <li>%d</li>' % i for i in xrange(10)] + [
             indent+'</ul>',
+            indent+'ab',
             indent+'a',
             indent+'b',
             indent+'ab',
