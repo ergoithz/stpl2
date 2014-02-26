@@ -10,7 +10,7 @@ import os
 import os.path
 
 # Py3k fixes
-py3k = sys.version_info.major > 2
+py3k = sys.version_info[0] > 2
 if py3k:
     import builtins
     iteritems = dict.items
