@@ -2,6 +2,9 @@
 # -*- coding: UTF-8 -*-
 
 import unittest
+import tempfile
+import shutil
+import os.path
 
 from . import *
 
@@ -21,7 +24,7 @@ class TestCodeTranslator(unittest.TestCase):
 
     def validate_syntax(self, code):
         pycode = ''.join(self.translator.translate_code(code))
-        return compile(pycode, 'test.py', 'exec')
+        return compile(pycode, '<template>', 'exec')
 
     def testCompilation(self):
         self.validate_syntax('''
@@ -45,7 +48,8 @@ class TestCodeTranslator(unittest.TestCase):
             '''.strip())
 
     def testExceptions(self):
-        templates = ("% extends", "% include", "% block")
+        # Expects one argument
+        templates = ("% extends", "% include", "% block", "% rebase")
         for code in templates:
             generator = self.translator.translate_code(code)
             self.assertRaises(TemplateValueError, "".join, generator)
@@ -53,6 +57,7 @@ class TestCodeTranslator(unittest.TestCase):
                      "% if True:\n% extends test\n% end",
                      "% extends 1\n% extends 2", "% block.super",
                      )
+        # Block limitations
         for code in templates:
             generator = self.translator.translate_code(code)
             self.assertRaises(TemplateSyntaxError, "".join, generator)
@@ -88,7 +93,7 @@ class TestTemplate(TestTemplateBase):
             </ul>
             <%
                 a = sum(range(100))
-                a = int(a/2)
+                a //= 2
             %>
             a<%
             %>b
@@ -124,6 +129,10 @@ class TestTemplate(TestTemplateBase):
             indent+'100%',
             indent])
 
+    def testExceptions(self):
+        code = "% extends something"
+        self.assertRaises(TemplateContextError, self.execute, code)
+
 
 class TestBufferingTemplate(TestTemplateBase):
     template_class = BufferingTemplate
@@ -142,11 +151,18 @@ class TestBufferingTemplate(TestTemplateBase):
 
 class TestTemplateManager(unittest.TestCase):
     def setUp(self):
-        self.manager = TemplateManager()
+        self.tmpdir = tempfile.mkdtemp()
+        self.manager = TemplateManager(self.tmpdir)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmpdir)
 
     def execute(self, name, env=None):
-        template = self.manager.get_template(name)
-        return ''.join(template.render(env))
+        return ''.join(self.manager.render(name, env))
+
+    def lines(self, name, env=None):
+        data = self.execute(name, env)
+        return [to_native(i).strip() for i in data.splitlines()]
 
     def testExtends(self):
         self.manager.templates['base1'] = Template('''
@@ -175,24 +191,25 @@ class TestTemplateManager(unittest.TestCase):
 
             Lines outside blocks are ignored on extending.
 
-            % block block2
+            % block "block2"
             % block.super
+            {{ block.super }}
             but I am inheriting
             % end
             ''',  manager=self.manager)
-        data = self.execute('template')
-        data = [to_native(i).strip() for i in data.splitlines()]
-        self.assertEqual(
-            data,
+        self.assertEqual(self.lines('template'),
             ['',
              'This is base1',
              'This is template block',
              'Interblocking',
              'This is base1 block2',
+             'This is base1 block2',
+             '',
              'but I am inheriting',
              ''])
 
     def testInclude(self):
+        # Token
         self.manager.templates['external'] = Template('''
             External template
             ''', manager=self.manager)
@@ -201,18 +218,59 @@ class TestTemplateManager(unittest.TestCase):
             % include external
             Third line
             ''', manager=self.manager)
-        data = self.execute('template')
-        data = [to_native(i).strip() for i in data.splitlines()]
-        self.assertEqual(
-            data,
-            ['',
-             'First line',
-             '',
-             'External template',
-             '',
-             'Third line',
-             ''])
+        self.assertEqual(self.lines('template'),
+            ['', 'First line', '', 'External template', 'Third line', ''])
+        # Variable
+        self.manager.templates['external'] = Template('''
+            External template
+            ''', manager=self.manager)
+        self.manager.templates['template'] = Template('''
+            First line
+            {{ include("external") }}
+            Third line
+            ''', manager=self.manager)
+        self.assertEqual(self.lines('template'),
+            ['', 'First line', '', 'External template', '',  'Third line', ''])
 
+    def testRebase(self):
+        # Token
+        self.manager.templates['template'] = Template('''
+            % rebase rebase
+            Base template
+            ''', manager=self.manager)
+        self.manager.templates['rebase'] = Template('''
+            First line
+            % base
+            Third line
+            ''', manager=self.manager)
+        self.assertEqual(self.lines('template'),
+            ['', 'First line', '', 'Base template', 'Third line', ''])
+        # Variable
+        self.manager.templates['template'] = Template('''
+            % rebase rebase
+            Base template
+            ''', manager=self.manager)
+        self.manager.templates['rebase'] = Template('''
+            First line
+            {{ base }}
+            Third line
+            ''', manager=self.manager)
+        self.assertEqual(self.lines('template'),
+            ['', 'First line', '', 'Base template', '', 'Third line', ''])
+
+    def testLookup(self):
+        with open(os.path.join(self.tmpdir, "testmplate.stpl"), "w") as f:
+            f.write('''
+                Simple template
+                ''')
+        self.assertEqual(self.execute("testmplate").strip(), "Simple template")
+
+    def testExceptions(self):
+        self.assertRaises(TemplateNotFoundError, self.manager.get_template, "notexistent")
+        self.manager.templates['a'] = Template("something", manager=self.manager)
+        self.assertEqual(self.execute('a'), "something")
+        self.manager.reset()
+        self.assertRaises(TemplateNotFoundError, self.manager.get_template, "a")
 
 
 if __name__ == '__main__':

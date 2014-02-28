@@ -6,9 +6,19 @@ python:
   - "3.3"
 
 install:
-  - "python setup.py install"
+  - pip install python-coveralls
+  - pip install pytest
+  - pip install pytest-pep8
+  - pip install pytest-cov
+  - python setup.py install
 
 script: make test
+
+before_script:
+  - py.test stpl2/tests.py --doctest-modules --pep8 coveralls -v --cov coveralls --cov-report term-missing
+
+after_success:
+  - coveralls
 
 notifications:
   email: false

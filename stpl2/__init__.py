@@ -4,13 +4,12 @@
 import re
 import sys
 import zlib
-import argparse
 import collections
 import os
 import os.path
 
 # Py3k fixes
-py3k = sys.version_info[0] > 2
+py3k = sys.version > '3'
 if py3k:
     import builtins
     iteritems = dict.items
@@ -18,6 +17,7 @@ if py3k:
     base_notfounderror = FileNotFoundError
     yield_from_supported = sys.version_info.minor > 2
     maxint = sys.maxsize
+    native_string_bases = (str,)
 
     def escape_string(data):
         return data.encode('unicode_escape').decode('ascii')
@@ -28,6 +28,7 @@ else:
     base_notfounderror = IOError
     yield_from_supported = False
     maxint = sys.maxint
+    native_string_bases = (basestring,)
 
     def escape_string(data):
         return data.encode("unicode_escape")
@@ -68,9 +69,8 @@ class CodeTranslator(object):
      * Code block start and/or ending lines are collapsed if empty.
      * Keyword 'pass' is omitted when unnecessary and automaticaly predicted for inline code.
      * Multiple lines are collapsed into a single yield.
-     * Extends/block functionality.
-     * Includes also supported.
-
+     * Supports enclude / rebase as in SimpleTemplate Engine.
+     * Supports extends / block as in django.
     '''
     tab = "    "
     linesep = "\n"
@@ -82,11 +82,9 @@ class CodeTranslator(object):
 
     indent_tokens = ("class", "def", "with", "if", "for", "while")
     redent_tokens = ("else", "elif", "except", "finally")
-    custom_tokens = ("block", "block.super", "end", "extends", "include")
+    custom_tokens = ("block", "block.super", "end", "extends", "include", "rebase", "base")
 
     def __init__(self):
-        '''
-        '''
         # Compile regexps
         indent = "((?P<indent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.indent_tokens)
         redent = "((?P<redent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.redent_tokens)
@@ -201,7 +199,7 @@ class CodeTranslator(object):
         if self.first_string_line:
             self.level_touched = True
             self.first_string_line = False
-            yield self.indent + "yield ("
+            yield "%syield (" % self.indent
             self.level += 1
 
     def yield_string_finish(self):
@@ -222,15 +220,15 @@ class CodeTranslator(object):
         '''
         :yield basestring: line with yield from for supported python versions
         '''
-        yield self.indent + "yield from %s" % param
+        yield "%syield from %s" % (self.indent, param)
 
     def yield_from_legacy(self, param):
         '''
         :yield basestring: lines with for line in... yield line for legacy python versions
         '''
-        yield self.indent + "for line in %s:" % param
+        yield "%sfor line in %s:" % (self.indent, param)
         self.level += 1
-        yield self.indent + "yield line"
+        yield "%syield line" % self.indent
         self.level -= 1
 
     yield_from = yield_from_native if yield_from_supported else yield_from_legacy
@@ -249,7 +247,7 @@ class CodeTranslator(object):
         :yield str: line pass if current block is empty
         '''
         if not self.level_touched:
-            yield self.indent + "pass"
+            yield "%spass" % self.indent
         self.level -= 1
         self.level_touched = True # level already touched by indent token
         if self.level < self.minlevel:
@@ -272,7 +270,7 @@ class CodeTranslator(object):
         args, kwargs, unparsed = self.token_params(params)
         name = kwargs.get("name", args[0] if args else None)
         if name is None:
-            raise TemplateValueError("Token 'extends' receives at least one parameter: name (line %d)." % self.linenum)
+            raise TemplateValueError("Token 'extends' receives at least one argument: name (line %d)." % self.linenum)
         self.extends = name
 
     def translate_token_block(self, params=None):
@@ -284,7 +282,7 @@ class CodeTranslator(object):
         args, kwargs, unparsed = self.token_params(params, 1)
         name = kwargs.get("name", args[0] if args else None)
         if name is None:
-            raise TemplateValueError("Token 'block' receives at least one parameter: name (line %d)." % self.linenum)
+            raise TemplateValueError("Token 'block' receives at least one argument: name (line %d)." % self.linenum)
         params = ("%r, %s" % (name, unparsed)) if unparsed else repr(name)
         for line in self.yield_from("block(%s)" % params):
             yield line
@@ -300,7 +298,7 @@ class CodeTranslator(object):
         '''
         if not self.block_stack:
             raise TemplateSyntaxError("Token 'block.super' outside any block (line %d)" % self.linenum)
-        for line in self.yield_from("block.super()"):
+        for line in self.yield_from("block.super"):
             yield line
 
     def translate_token_include(self, params=None):
@@ -311,11 +309,28 @@ class CodeTranslator(object):
         args, kwargs, unparsed = self.token_params(params, 1)
         name = kwargs.get("name", args[0] if args else None)
         if name is None:
-            raise TemplateValueError("Token 'include' receives at least one parameter: name (line %d)." % self.linenum)
+            raise TemplateValueError("Token 'include' receives at least one argument: name (line %d)." % self.linenum)
         params = ("%r, %s" % (name, unparsed)) if unparsed else repr(name)
         for line in self.yield_from("include(%s)" % params):
             yield line
         self.includes.append(name)
+
+    def translate_token_rebase(self, params=None):
+        '''
+
+        '''
+        args, kwargs, unparsed = self.token_params(params, 1)
+        name = kwargs.get("name", args[0] if args else None)
+        if name is None:
+            raise TemplateValueError("Token 'rebase' receives at least one argument: name (line %d)." % self.linenum)
+        self.rebase = name
+
+    def translate_token_base(self, params=None):
+        '''
+        :yield: lines for yielding base template
+        '''
+        for line in self.yield_from("base"):
+            yield line
 
     def translate_code_line(self, data):
         '''
@@ -323,14 +338,17 @@ class CodeTranslator(object):
         '''
         # Code line
         lstripped = data[self.code_line_prefix_length:].lstrip()
-        group = self.re_tokens.match(lstripped).groupdict()
+        try:
+            group = self.re_tokens.match(lstripped).groupdict()
+        except AttributeError:
+            group = {'custom':None,'redent':None,'indent':None}
         if group['custom']:
             method = 'translate_token_%s' % group['custom'].replace('.', '_')
             for line in getattr(self, method)(group['params']) or ():
                 yield line
         elif group['redent']:
             if not self.level_touched:
-                yield self.indent + 'pass'
+                yield '%spass' % self.indent
             self.level -= 1
             yield self.indent + lstripped
             self.level += 1
@@ -345,20 +363,20 @@ class CodeTranslator(object):
     def translate_string_line(self, data):
         '''
         Translate regular template line with or without variable substitutions.
-
+        :yields: lines that's starts yielding string (if not already done) and string line.
         '''
         # String
         if data.strip():
             data = self.re_var.sub(self.translate_var, data.replace("%", "%%"))
             data = escape_string(data)
-            trail = "" if self.inline else self.linesep_escaped
             for i in self.yield_string_start():
                 yield i
-            yield "%s%s\"%s%s\"" % (self.indent, unicode_prefix, data, trail)
+            yield "%s%s\"%s\"" % (self.indent, unicode_prefix, data)
         elif not self.inline:
+            data = escape_string(data)
             for i in self.yield_string_start():
                 yield i
-            yield "%s%s\"%s%s\"" % (self.indent, unicode_prefix, data, self.linesep_escaped)
+            yield "%s%s\"%s\"" % (self.indent, unicode_prefix, data)
 
     def translate_literal_line(self, data):
         '''
@@ -442,28 +460,45 @@ class CodeTranslator(object):
         # Yield lines
         yield "# -*- coding: UTF-8 -*-%s" % self.linesep
         yield "def __template__():%s" % self.linesep
-        for self.linenum, line in enumerate(data.splitlines()):
+        oneline = False
+        for self.linenum, line in enumerate(data.splitlines(True)):
             for part in self.translate_line(line):
                 if self.block_stack:
                     block_line, block_name = self.block_stack[-1]
                     self.block_content[block_name].append(part)
                     continue
+                oneline |= True
                 yield part + self.linesep
-        for line in self.yield_string_finish():
-            yield line + self.linesep
-        del self.string_vars[:]
-
+        self.level = self.minlevel # Reset level
+        if not oneline:
+            # empty template, pass
+            yield "%spass%s" % (self.indent, self.linesep)
+        else:
+            for line in self.yield_string_finish():
+                yield line + self.linesep
+            del self.string_vars[:]
         # Yield blocks
         yield "__blocks__ = {}%s" % self.linesep
         for name, lines in iteritems(self.block_content):
             yield "def __block__(block):%s" % self.linesep
-            for line in lines:
+            oneline = False
+            for linenum, line in enumerate(lines):
+                oneline |= True
                 yield line + self.linesep
+            if not oneline:
+                yield "%spass%s" % (self.indent, self.linesep)
             yield "__blocks__[%r] = __block__%s" % (name, self.linesep)
 
         # Yield metadata fields
-        yield "__includes__ = %r%s" % (self.includes, self.linesep)
-        yield "__extends__ = %r%s" % (self.extends, self.linesep)
+        yield (
+            "__includes__ = %r%s"
+            "__extends__ = %r%s"
+            "__rebase__ = %r%s"
+            ) % (
+            self.includes, self.linesep,
+            self.extends, self.linesep,
+            self.rebase, self.linesep,
+            )
 
     def reset(self):
         '''
@@ -473,9 +508,11 @@ class CodeTranslator(object):
         self.first_string_line = True
         self.unfinished_token = False
         self.base = None
+        self.linenum = -1
         self.level = self.minlevel = 1
         self.translate_line = self.translate_template_line
         self.extends = None
+        self.rebase = None
         self.includes = []
         self.string_vars = []
         self.block_stack = [] # list of block levels as (base, name)
@@ -483,20 +520,55 @@ class CodeTranslator(object):
         self.level_touched = False
 
 
-class LocalBlock(object):
+class StringGenerator(object):
     '''
-    Object will be passed to block as local 'block' variable.
+    Generic generator wrapper which receives a generator factory function and
+    arguments and allows iteration.
     '''
-    def __init__(self, template_context, name):
-        self.template_context = template_context
-        self.name = name
+    @classmethod
+    def _none(self):
+        return ()
 
-    def __call__(self, name, **environ):
-        for line in self.template_context.block(name, **environ):
+    def __init__(self, iterfunc=None, *args, **kwargs):
+        self._iterfunc = self._none if iterfunc is None else iterfunc
+        self._args = args
+        self._kwargs = kwargs
+
+    def __iter__(self):
+        for line in self._iterfunc(*self._args, **self._kwargs):
             yield line
 
-    def super(self, **environ):
-        for line in self.template_context.block_super(self.name, **environ):
+    def __str__(self):
+        return "".join(self)
+
+
+class LocalBlockGenerator(StringGenerator):
+    '''
+    Block context variable inside blocks
+    '''
+    def __init__(self, superfunc, *args, **kwargs):
+        StringGenerator.__init__(self)
+        self.super = StringGenerator(superfunc, *args, **kwargs)
+
+
+class BlockGenerator(StringGenerator):
+    '''
+    Object retrieved by block function
+    '''
+    local_block_class = LocalBlockGenerator
+
+    @property
+    def super(self):
+        return StringGenerator(self._superfunc, self.name)
+
+    def __init__(self, iterfunc, superfunc, name):
+        StringGenerator.__init__(self, iterfunc)
+        self._name = name
+        self._superfunc = superfunc
+
+    def __iter__(self):
+        local_block = self.local_block_class(self._superfunc, self._name, self.local_block_class)
+        for line in self._iterfunc(local_block):
             yield line
 
 
@@ -504,12 +576,23 @@ class TemplateContext(object):
     '''
     Manage context, env and evaluated generators from given template code.
     '''
-    local_block_class = LocalBlock
+    block_class = BlockGenerator
+    base_class = StringGenerator
+    include_class = StringGenerator
 
     @property
     def template(self):
         '''
         Current template generator-function.
+        '''
+        if self.rebased:
+            return self.rebased.template
+        return self.base_template
+
+    @property
+    def base_template(self):
+        '''
+        Current non-rebased template generator-function
         '''
         if self.parent:
             return self.parent.template
@@ -552,22 +635,41 @@ class TemplateContext(object):
         self.pool = pool
         self.manager = manager
         self.namespace = {}
-        self.includes = {}
+        self.includes_cache = {}
+
+        # Relations for rebase
+        self.rebased = None
+        self.base = ""
+
+        # Relations for extends
         self.parent = None
         self.child = None
 
         eval(code, self.namespace)
         self.owned_template = self.namespace["__template__"]
-        self.owned_includes = self.namespace["__includes__"]
 
         self.blocks = self.namespace["__blocks__"]
+        self.includes = self.namespace["__includes__"]
+
         self.extends = self.namespace["__extends__"]
+        self.rebase = self.namespace["__rebase__"]
+
+        if self.manager is None and (self.includes or self.extends or self.rebase):
+            raise TemplateContextError("TemplateContext's extends, include and rebase require a template manager.")
+
+        if self.includes:
+            self.includes_cache.update(
+                (name, self.manager.get_template(name).get_context())
+                for name in self.includes
+                )
 
         if self.extends:
-            if self.manager is None:
-                raise TemplateContextError("TemplateContext's extends requires manager to be passed.")
-            self.parent = self.manager.get_template_context(self.extends)
+            self.parent = self.manager.get_template(self.extends).get_context()
             self.parent.child = self
+
+        if self.rebase:
+            self.rebased = self.manager.get_template(self.rebase).get_context()
+            self.rebased.base = self.get_base()
 
         self.reset() # clean namespace
 
@@ -578,19 +680,21 @@ class TemplateContext(object):
         self.reset()
         self.pool.append(self)
 
-    def include(self, name, **environ):
-        # TODO: optimize
-        context = self.manager.get_template_context(name)
+    def get_include(self, name, **environ):
+        '''
+        Get include iterable based on :py:cvar:include_class
+        '''
+        if not name in self.includes_cache:
+            self.includes_cache[name] = self.manager.get_template(name).get_context()
+        context = self.includes_cache[name]
         context.reset()
         context.update(environ)
-        with context as render_func:
-            for line in render_func():
-                yield line
+        return self.include_class(self.includes_cache[name].template)
 
-    def get_local_block(self, name):
-        return self.local_block_class(self, name)
-
-    def block(self, name, **environ):
+    def get_block(self, name, **environ):
+        '''
+        Get block iterable based on :py:cvar:block_class
+        '''
         child = self.childmost or self
         if name in child.blocks:
             context = child
@@ -602,10 +706,18 @@ class TemplateContext(object):
         if context:
             context.reset()
             context.update(environ)
-            for line in context.blocks[name](context.get_local_block(name)):
-                yield line
+            return context.block_class(context.blocks[name], context.iter_super, name)
 
-    def block_super(self, name, **environ):
+    def get_base(self, **environ):
+        '''
+        Get block iterable based on :py:cvar:block_base
+        '''
+        return self.base_class(self.base_template)
+
+    def iter_super(self, name, local_block_class, **environ):
+        '''
+        Get nearest parent block generator with given name
+        '''
         context = None
         for parent in self.iter_ancestors():
             if name in parent.blocks:
@@ -614,20 +726,23 @@ class TemplateContext(object):
         if context:
             context.reset()
             context.update(environ)
-            for line in context.blocks[name](context.get_local_block(name)):
-                yield line
+            return context.blocks[name](local_block_class)
+        return ()
 
     def reset(self):
         '''
         Clears and repopulate template namespace
         '''
+        if self.rebased:
+            self.rebased.reset()
         self.namespace.clear()
         self.namespace.update(builtins.__dict__)
         self.namespace.update({
-            # Inheritance vars
-            "include": self.include,
-            "block": self.block,
+            # Global vars
+            "base": self.base,
             # Global functions
+            "include": self.get_include,
+            "block": self.get_block,
             "defined": self.namespace.__contains__,
             "get": self.namespace.get,
             "setdefault": self.namespace.setdefault,
@@ -651,72 +766,81 @@ class Template(object):
     def code(self):
         return self._code
 
-    @code.setter
-    def code(self, v):
-        pycode = "".join(self.translate_class().translate_code(v))
-        self._code = v
-        self._pycode = zlib.compress(pycode.encode("utf-8"))
-        self._pycompiled = compile(pycode, self.filename or "<template>", "exec")
-
     @property
     def pycode(self):
         return zlib.decompress(self._pycode).decode("utf-8")
 
     @property
-    def pycompiled(self):
-        return self._pycompiled
+    def manager(self):
+        return self._manager
+
+    @property
+    def filename(self):
+        return self._filename
 
     def __init__(self, code, filename=None, manager=None):
-        self.filename = filename
-        self.manager = manager
-        self.code = code
-        self.pool = []
+        self._filename = filename
+        self._manager = manager
 
-    def template_context(self, env=None):
+        pycode = "".join(self.translate_class().translate_code(code))
+        self._code = code
+        self._pycode = zlib.compress(pycode.encode("utf-8"))
+        self._pycompiled = compile(pycode, filename or "<template>", "exec")
+        self._pool = []
+
+    def get_context(self, env=None):
         '''
         Generate the new template generator function
         '''
-        if self.pool:
-            context = self.pool.pop()
+        if self._pool:
+            context = self._pool.pop()
         else:
-            context = self.template_context_class(self._pycompiled, self.pool, self.manager)
+            context = self.template_context_class(self._pycompiled, self._pool, self._manager)
         if env:
             context.update(env)
         return context
 
     def render(self, env=None):
-        with self.template_context(env) as render_func:
+        '''
+
+        '''
+        with self.get_context(env) as render_func:
             for line in render_func():
                 yield line
 
 
 class BufferingTemplate(Template):
+    '''
+    Template which yields buffered chunks of :py:cvar:buffersize size.
+    '''
     buffersize = 4096
 
     def render(self, env=None):
-        with self.template_context(env) as render_func:
-            buffsize = 0
-            cache = []
-            for line in render_func():
-                cache.append(line)
-                buffsize += len(line)
-                # Buffering
-                while buffsize > self.buffersize:
-                    data = "".join(cache)
-                    yield data[:self.buffersize]
-                    data = data[self.buffersize:]
-                    cache[:] = (data,) if data else ()
-                    buffsize = len(data)
-            if cache:
-                yield "".join(cache)
+        buffsize = 0
+        cache = []
+        for line in Template.render(self, env):
+            cache.append(line)
+            buffsize += len(line)
+            # Buffering
+            while buffsize > self.buffersize:
+                data = "".join(cache)
+                yield data[:self.buffersize]
+                data = data[self.buffersize:]
+                cache[:] = (data,) if data else ()
+                buffsize = len(data)
+        if cache:
+            yield "".join(cache)
 
 
 class TemplateManager(object):
+    '''
+    Template manager.
+    '''
     template_class = Template
     template_extensions = (".tpl", ".stpl")
 
     def __init__(self, directories=None):
-        self.directories = [] if directories is None else directories
+        self.directories = ensure_set(directories)
         self.templates = {}
 
     def get_template(self, name):
@@ -731,9 +855,9 @@ class TemplateManager(object):
                     template_path = path
                     break
                 for ext in self.template_extensions:
-                    path += ext
-                    if os.path.isfile(path):
-                        template_path = path
+                    extpath = path + ext
+                    if os.path.isfile(extpath):
+                        template_path = extpath
                         break
                 else:
                     continue
@@ -744,13 +868,7 @@ class TemplateManager(object):
                 self.templates[name] = Template(f.read(), template_path, self)
         return self.templates[name]
 
-    def get_template_context(self, name):
-        '''
-        Get template context corresponding to template with given name.
-        '''
-        return self.get_template(name).template_context()
-
-    def render_template(self, name, env=None):
+    def render(self, name, env=None):
         '''
         Render template corresponding
         '''
@@ -763,3 +881,13 @@ class TemplateManager(object):
         Clear template cache.
         '''
         self.templates.clear()
+
+
+def ensure_set(obj):
+    if obj is None:
+        return set()
+    elif isinstance(obj, native_string_bases):
+        return set((obj,))
+    elif not isinstance(obj, set):
+        return set(obj)
+    return obj
