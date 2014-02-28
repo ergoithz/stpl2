@@ -1,6 +1,47 @@
 #!/usr/bin/env python
 # -*- coding: UTF-8 -*-
+'''
+Stpl2
+=====
+Stpl 2 is a standalone reimplementation of bottle.py's SimpleTemplate Engine,
+for better maintenability and performance, and with some extra features.
 
+Features
+~~~~~~~~
+ * Templates are translated to generator functions (yield from is used if supported).
+ * Readable and optimal python code generation.
+ * Code block smart collapsing.
+ * Supports include and rebase as in bottle.py's SimpleTemplate Engine.
+ * Supports extends, block and block.super as in django templates.
+ * Near-full tested.
+
+Rules
+~~~~~
+ * Lines starting with '%' are translated to python code.
+ * Lines starting with '% end' decrement indentation level.
+ * Code blocks starts with '<%', and ends with '%>'.
+ * Variable substitution starts with '{{', and ends with '}}'.
+
+Usage
+~~~~~
+
+example.py
+
+    #!/usr/bin/env python
+    # -*- coding: UTF-8 -*-
+    import stpl2
+    manager = stpl2.TemplateManager("my/template/directory")
+    manager.render("my_template", {"some":1,"vars":2}
+
+my_template.tpl
+
+    This is sort of template.
+    With {{ some }} {{ vars }}.
+
+
+
+
+'''
 import re
 import sys
 import zlib
@@ -53,24 +94,6 @@ class TemplateValueError(ValueError):
 class CodeTranslator(object):
     '''
     Translate from SimpleTemplate Engine 2 syntax to Python code.
-
-    Rules
-    ~~~~~
-     * Lines starting with '%' are translated to python code.
-     * Lines starting with '% end' decrement indentation level.
-     * Code blocks starts with '<%', and ends with '%>'.
-     * Variable substitution starts with '{{', and ends with '}}'.
-
-    Features
-    ~~~~~~~~
-     * Generator-function based templates.
-     * Yield from is used if supported by current python version.
-     * Readable and optimal code output.
-     * Code block start and/or ending lines are collapsed if empty.
-     * Keyword 'pass' is omitted when unnecessary and automaticaly predicted for inline code.
-     * Multiple lines are collapsed into a single yield.
-     * Supports enclude / rebase as in SimpleTemplate Engine.
-     * Supports extends / block as in django.
     '''
     tab = "    "
     linesep = "\n"
@@ -317,7 +340,8 @@ class CodeTranslator(object):
 
     def translate_token_rebase(self, params=None):
         '''
-
+        Parses name from params and adds to :py:var:rebase which will be used
+        later.
         '''
         args, kwargs, unparsed = self.token_params(params, 1)
         name = kwargs.get("name", args[0] if args else None)
@@ -574,7 +598,10 @@ class BlockGenerator(StringGenerator):
 
 class TemplateContext(object):
     '''
-    Manage context, env and evaluated generators from given template code.
+    Template namespace boilerplate, interpret, manages context, inheritance and
+    generator functions from given template code.
+
+    Can be used as context manager.
     '''
     block_class = BlockGenerator
     base_class = StringGenerator
@@ -802,7 +829,10 @@ class Template(object):
 
     def render(self, env=None):
         '''
+        Renders template updating global namespace with env dict-like object.
 
+        :param dict env: environment dictionary
+        :yields str: template lines as string
         '''
         with self.get_context(env) as render_func:
             for line in render_func():
@@ -812,10 +842,21 @@ class Template(object):
 class BufferingTemplate(Template):
     '''
     Template which yields buffered chunks of :py:cvar:buffersize size.
+
+    You may want to inherit from this class in order to define a different
+    value or, alternatively, change it once object is initialized.
     '''
     buffersize = 4096
 
     def render(self, env=None):
+        '''
+        Renders template updating global namespace with env dict-like object.
+        Additionaly, this function ensures all-but-last yielded strings have
+        the same length defined in :py:cvar:buffersize.
+
+        :param dict env: environment dictionary
+        :yields str: template lines as string
+        '''
         buffsize = 0
         cache = []
         for line in Template.render(self, env):
@@ -834,7 +875,12 @@ class BufferingTemplate(Template):
 
 class TemplateManager(object):
     '''
-    Template manager.
+    Template manager is responsible of Template loading and caching, and should
+    be instanced once for your application.
+
+    Please consider that template parsing, compiling and running is much slower
+    than taken a precompiled template from cache, so using this class is
+    absolutely recommended.
     '''
     template_class = Template
     template_extensions = (".tpl", ".stpl")
@@ -845,24 +891,32 @@ class TemplateManager(object):
 
     def get_template(self, name):
         '''
-        Get template object from given name.
+        Get template object from given name from cache, template directories, or path.
+
+        Note that template is cached based on given name, so if you pass to this method an absolute path, it will be the key from cache.
+
+        :param str name: name of template (path or name if extension is in :py:cvar:template_extensions)
+        :return Template: template object
         '''
         if not name in self.templates:
             template_path = None
-            for directory in self.directories:
-                path = os.path.join(directory, name)
-                if os.path.isfile(path):
-                    template_path = path
-                    break
-                for ext in self.template_extensions:
-                    extpath = path + ext
-                    if os.path.isfile(extpath):
-                        template_path = extpath
+            if not os.path.isabs(name):
+                for directory in self.directories:
+                    path = os.path.join(directory, name)
+                    if os.path.isfile(path):
+                        template_path = path
                         break
-                else:
-                    continue
-                break
-            else:
+                    for ext in self.template_extensions:
+                        extpath = path + ext
+                        if os.path.isfile(extpath):
+                            template_path = extpath
+                            break
+                    else:
+                        continue
+                    break
+            elif os.path.exists(name):
+                template_path = name
+            if template_path is None:
                 raise TemplateNotFoundError("Template %r not found" % name)
             with open(template_path) as f:
                 self.templates[name] = Template(f.read(), template_path, self)
@@ -870,7 +924,11 @@ class TemplateManager(object):
 
     def render(self, name, env=None):
         '''
-        Render template corresponding
+        Render template corresponding to given name or path.
+
+        :param str name: name or path for template
+        :param dict env: optional variable dictionary
+        :yield str: string with lines from rendered template
         '''
         template = self.get_template(name)
         for line in template.render(env):
@@ -884,6 +942,12 @@ class TemplateManager(object):
 
 
 def ensure_set(obj):
+    '''
+    Ensure given object is correctly converted to a set.
+
+    :param obj: any python object
+    :return: set containing obj or elements from obj if non-string iterable.
+    '''
     if obj is None:
         return set()
     elif isinstance(obj, native_string_bases):
