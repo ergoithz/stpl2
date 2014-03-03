@@ -6,16 +6,11 @@ python:
   - "3.3"
 
 install:
-  - pip install python-coveralls
-  - pip install pytest
-  - pip install pytest-pep8
-  - pip install pytest-cov
+  - pip install coveralls
   - python setup.py install
 
-script: make test
-
-before_script:
-  - py.test stpl2/tests.py --doctest-modules --pep8 coveralls -v --cov coveralls --cov-report term-missing
+script:
+  - coverage run --source=stpl2 setup.py test
 
 after_success:
   - coveralls
