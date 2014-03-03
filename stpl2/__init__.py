@@ -59,9 +59,6 @@ if py3k:
     yield_from_supported = sys.version_info.minor > 2
     maxint = sys.maxsize
     native_string_bases = (str,)
-
-    def escape_string(data):
-        return data.encode('unicode_escape').decode('ascii')
 else:
     import __builtin__ as builtins
     iteritems = dict.iteritems
@@ -70,9 +67,6 @@ else:
     yield_from_supported = False
     maxint = sys.maxint
     native_string_bases = (basestring,)
-
-    def escape_string(data):
-        return data.encode("unicode_escape")
 
 
 class TemplateSyntaxError(SyntaxError):
@@ -118,7 +112,6 @@ class CodeTranslator(object):
             re.escape(self.variable_close)
             ))
         self.code_line_prefix_length = len(self.code_line_prefix)
-        self.linesep_escaped = escape_string(self.linesep)
 
     @classmethod
     def param_split(cls, params, seps, valuesep, strip, quote='\'"',
@@ -392,15 +385,13 @@ class CodeTranslator(object):
         # String
         if data.strip():
             data = self.re_var.sub(self.translate_var, data.replace("%", "%%"))
-            data = escape_string(data)
             for i in self.yield_string_start():
                 yield i
-            yield "%s%s\"%s\"" % (self.indent, unicode_prefix, data)
+            yield '%s%r' % (self.indent,data)
         elif not self.inline:
-            data = escape_string(data)
             for i in self.yield_string_start():
                 yield i
-            yield "%s%s\"%s\"" % (self.indent, unicode_prefix, data)
+            yield '%s%r' % (self.indent, data)
 
     def translate_literal_line(self, data):
         '''
@@ -429,13 +420,13 @@ class CodeTranslator(object):
                 for i in self.yield_string_start():
                     yield i
                 if self.previous_indent:
-                    yield "%s%s\"%s\"" % (self.indent, unicode_prefix, " " * self.previous_indent)
+                    yield "%s%r" % (self.indent, " " * self.previous_indent)
                 for line in self.translate_line(template_data):
                     yield line
             elif self.previous_string:
                 for i in self.yield_string_start():
                     yield i
-                yield "%s%s\"%s\"" % (self.indent, unicode_prefix, self.linesep_escaped)
+                yield "%s%r" % (self.indent, self.linesep)
 
     def translate_template_line(self, data):
         '''
