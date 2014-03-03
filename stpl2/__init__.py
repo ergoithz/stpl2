@@ -107,7 +107,7 @@ class CodeTranslator(object):
         redent = "((?P<redent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.redent_tokens)
         custom = "((?P<custom>(%s))(?!\w)\s*(?P<params>((\s+.*)|(\(.*\)))\s*)?$)" % "|".join(re.escape(i) for i in self.custom_tokens)
         self.re_tokens = re.compile("^(%s)" % "|".join((indent, redent, custom)))
-        self.re_var = re.compile("%s(.*)%s" % (
+        self.re_var = re.compile("(%s(.*)%s)|(%%)" % (
             re.escape(self.variable_open),
             re.escape(self.variable_close)
             ))
@@ -254,7 +254,10 @@ class CodeTranslator(object):
         Get variable string substitution (for re.sub) and store variable code.
         :return str: positional variable string substitution '%s'
         '''
-        self.string_vars.append(match.groups()[0])
+        vargroup, content, substitution = match.groups()
+        if substitution:
+            return "%%"
+        self.string_vars.append(content)
         return "%s"
 
     def translate_token_end(self, params=None):
@@ -384,7 +387,7 @@ class CodeTranslator(object):
         '''
         # String
         if data.strip():
-            data = self.re_var.sub(self.translate_var, data.replace("%", "%%"))
+            data = self.re_var.sub(self.translate_var, data)
             for i in self.yield_string_start():
                 yield i
             yield '%s%r' % (self.indent,data)

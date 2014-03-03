@@ -86,6 +86,7 @@ class TestTemplate(TestTemplateBase):
         data = self.execute('''
             {{ var1 }}
             {{ get('var2', 2) }}
+            {{ "hello %s" % "world" }}
             <ul>
                 % for i in range(10):
                 <li>{{ i }}</li>
@@ -117,6 +118,7 @@ class TestTemplate(TestTemplateBase):
            ['',
             indent+'1',
             indent+'2',
+            indent+'hello world',
             indent+'<ul>',
            ] + [indent+'    <li>%d</li>' % i for i in xrange(10)] + [
             indent+'</ul>',
