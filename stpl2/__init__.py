@@ -102,15 +102,21 @@ class CodeTranslator(object):
     custom_tokens = ("block", "block.super", "end", "extends", "include", "rebase", "base")
 
     def __init__(self):
-        # Compile regexps
-        indent = "((?P<indent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.indent_tokens)
-        redent = "((?P<redent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.redent_tokens)
-        custom = "((?P<custom>(%s))(?!\w)\s*(?P<params>((\s+.*)|(\(.*\)))\s*)?$)" % "|".join(re.escape(i) for i in self.custom_tokens)
+        # compile regexps
+        indent = r"((?P<indent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.indent_tokens)
+        redent = r"((?P<redent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.redent_tokens)
+        custom = r"((?P<custom>(%s))(?!\w)\s*(?P<params>((\s+.*)|(\(.*\)))\s*)?$)" % "|".join(re.escape(i) for i in self.custom_tokens)
+
+        # massive nongreedy string and escape sensitive dotall regexp
+        mnsesdr = r"(\'((\\.)|[^\'])*?\')|(\"((\\.)|[^\"])*?\")|(.*?)"
+
+        # regexp precompilation
         self.re_tokens = re.compile("^(%s)" % "|".join((indent, redent, custom)))
-        self.re_var = re.compile("(%s(.*)%s)|(%%)" % (
-            re.escape(self.variable_open),
-            re.escape(self.variable_close)
-            ))
+        self.re_var = re.compile("(%s(?P<var>(%s)*?)%s)|(?P<escape>%%)" % (
+            re.escape(self.variable_open), mnsesdr, re.escape(self.variable_close)))
+        self.re_inline = re.compile("({(%s)*?}|(%s)*?)*?:(?P<inline>.*)" % (
+            mnsesdr, mnsesdr))
+
         self.code_line_prefix_length = len(self.code_line_prefix)
 
     @classmethod
@@ -199,6 +205,18 @@ class CodeTranslator(object):
                                    free_escape=free_escape, maxnum=maxnum)
         return (), {}, ""
 
+    def check_indent(self, line):
+        '''
+        Get if current line should increment indent or not (if has inline code).
+        :param string line: line of code with indent token
+        :returns bool: True if line contains no inline code so must indent.
+        '''
+        match = self.re_inline.match(line)
+        if match:
+            stripped = match.groupdict().get("inline", "").strip()
+            return not stripped or stripped.startswith("#")
+        return True
+
     @property
     def indent(self):
         '''
@@ -254,10 +272,10 @@ class CodeTranslator(object):
         Get variable string substitution (for re.sub) and store variable code.
         :return str: positional variable string substitution '%s'
         '''
-        vargroup, content, substitution = match.groups()
-        if substitution:
+        group = match.groupdict()
+        if group.get("escape", None):
             return "%%"
-        self.string_vars.append(content)
+        self.string_vars.append(group.get("var", ""))
         return "%s"
 
     def translate_token_end(self, params=None):
@@ -371,12 +389,13 @@ class CodeTranslator(object):
                 yield '%spass' % self.indent
             self.level -= 1
             yield self.indent + lstripped
-            self.level += 1
-            self.level_touched = False
+            if self.check_indent(lstripped):
+                self.level += 1
+                self.level_touched = False
         else:
             if lstripped.strip():
                 yield self.indent + lstripped
-            if group['indent']:
+            if group['indent'] and self.check_indent(lstripped):
                 self.level += 1
                 self.level_touched = False
 
