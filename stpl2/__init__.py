@@ -54,7 +54,6 @@ py3k = sys.version > '3'
 if py3k:
     import builtins
     iteritems = dict.items
-    unicode_prefix = ''
     base_notfounderror = FileNotFoundError
     yield_from_supported = sys.version_info.minor > 2
     maxint = sys.maxsize
@@ -62,7 +61,6 @@ if py3k:
 else:
     import __builtin__ as builtins
     iteritems = dict.iteritems
-    unicode_prefix = 'u'
     base_notfounderror = IOError
     yield_from_supported = False
     maxint = sys.maxint
@@ -107,7 +105,7 @@ class CodeTranslator(object):
         redent = "((?P<redent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.redent_tokens)
         custom = "((?P<custom>(%s))(?!\w)\s*(?P<params>((\s+.*)|(\(.*\)))\s*)?$)" % "|".join(re.escape(i) for i in self.custom_tokens)
         self.re_tokens = re.compile("^(%s)" % "|".join((indent, redent, custom)))
-        self.re_var = re.compile("(%s(.*)%s)|(%%)" % (
+        self.re_var = re.compile("(%s(.*?)%s)|(%%)" % (
             re.escape(self.variable_open),
             re.escape(self.variable_close)
             ))

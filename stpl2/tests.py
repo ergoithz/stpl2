@@ -87,6 +87,7 @@ class TestTemplate(TestTemplateBase):
             {{ var1 }}
             {{ get('var2', 2) }}
             {{ "hello %s" % "world" }}
+            {{ var1 }} and {{ var1 }}
             <ul>
                 % for i in range(10):
                 <li>{{ i }}</li>
@@ -119,6 +120,7 @@ class TestTemplate(TestTemplateBase):
             indent+'1',
             indent+'2',
             indent+'hello world',
+            indent+'1 and 1',
             indent+'<ul>',
            ] + [indent+'    <li>%d</li>' % i for i in xrange(10)] + [
             indent+'</ul>',
