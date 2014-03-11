@@ -112,9 +112,9 @@ class CodeTranslator(object):
 
         # regexp precompilation
         self.re_tokens = re.compile("^(%s)" % "|".join((indent, redent, custom)))
-        self.re_var = re.compile("(%s(?P<var>(%s)*?)%s)|(?P<escape>%%)" % (
+        self.re_var = re.compile("(%s(?P<var>(%s)*)%s)|(?P<escape>%%)" % (
             re.escape(self.variable_open), mnsesdr, re.escape(self.variable_close)))
-        self.re_inline = re.compile("({(%s)*?}|(%s)*?)*?:(?P<inline>.*)" % (
+        self.re_inline = re.compile("({(%s)}|(%s))*:(?P<inline>.*)" % (
             mnsesdr, mnsesdr))
 
         self.code_line_prefix_length = len(self.code_line_prefix)

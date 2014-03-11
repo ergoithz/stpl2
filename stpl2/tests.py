@@ -82,14 +82,44 @@ class TestTemplateBase(unittest.TestCase):
 
 class TestTemplate(TestTemplateBase):
     template_class = Template
+    def testParsing(self):
+        data = self.execute('''
+            {{ "hello %s" % "world" }}
+            {{ "1" }}2{{ "3" }}
+            {{ '{{' }} var {{ '}}' }}
+            {{ '{{\\'{{' }}a{{ '}}' }}
+            ''')
+        data = [to_native(i).strip() for i in data.splitlines()]
+        self.assertEqual(
+           data,
+           ['',
+            'hello world',
+            '123',
+            '{{ var }}',
+            '{{\'{{a}}',
+            ''])
+
+    def testInline(self):
+        data = self.execute('''
+            % if False: pass
+            % for i in "%%%\\"::":
+                {{ i }}
+            % end
+            % if False: # a comment
+                % pass
+            % end
+            ''')
+        data = [to_native(i).strip() for i in data.splitlines()]
+        self.assertEqual(
+           data,
+           ['',
+            '%', '%', '%', '\"', ':', ':',
+            ''])
+
     def testSyntax(self):
         data = self.execute('''
             {{ var1 }}
             {{ get('var2', 2) }}
-            {{ "hello %s" % "world" }}
-            {{ "1" }}2{{ "3" }}
-            {{ '{{' }} var {{ '}}' }}
-            % if False: pass
             <ul>
                 % for i in range(10):
                 <li>{{ i }}</li>
@@ -121,9 +151,6 @@ class TestTemplate(TestTemplateBase):
            ['',
             indent+'1',
             indent+'2',
-            indent+'hello world',
-            indent+'123',
-            indent+'{{ var }}',
             indent+'<ul>',
            ] + [indent+'    <li>%d</li>' % i for i in xrange(10)] + [
             indent+'</ul>',
