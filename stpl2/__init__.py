@@ -107,15 +107,16 @@ class CodeTranslator(object):
         redent = r"((?P<redent>(%s))(?!\w))" % "|".join(re.escape(i) for i in self.redent_tokens)
         custom = r"((?P<custom>(%s))(?!\w)\s*(?P<params>((\s+.*)|(\(.*\)))\s*)?$)" % "|".join(re.escape(i) for i in self.custom_tokens)
 
-        # massive nongreedy string and escape sensitive dotall regexp
-        mnsesdr = r"(\'((\\.)|[^\'])*?\')|(\"((\\.)|[^\"])*?\")|(.*?)"
+        redict = {
+            'string': r"(\'((\\.)|[^\'])*?\')|(\"((\\.)|[^\"])*?\")", # massive nongreedy string and escape sensitive dotall regexp
+            'var_open': re.escape(self.variable_open),
+            'var_close': re.escape(self.variable_close),
+        }
 
         # regexp precompilation
         self.re_tokens = re.compile("^(%s)" % "|".join((indent, redent, custom)))
-        self.re_var = re.compile("(%s(?P<var>(%s)*)%s)|(?P<escape>%%)" % (
-            re.escape(self.variable_open), mnsesdr, re.escape(self.variable_close)))
-        self.re_inline = re.compile("({(%s)}|(%s))*:(?P<inline>.*)" % (
-            mnsesdr, mnsesdr))
+        self.re_var = re.compile("(%(var_open)s(?P<var>(%(string)s|.)*?)%(var_close)s)|(?P<escape>%%)" % redict)
+        self.re_inline = re.compile("(\{(%(string)s)\}|(%(string)s)|.)*?:(?P<inline>.*)" % redict)
 
         self.code_line_prefix_length = len(self.code_line_prefix)
 
