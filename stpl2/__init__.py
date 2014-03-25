@@ -31,7 +31,7 @@ example.py
     # -*- coding: UTF-8 -*-
     import stpl2
     manager = stpl2.TemplateManager("my/template/directory")
-    manager.render("my_template", {"some":1,"vars":2}
+    manager.render("my_template", {"some":1,"vars":2})
 
 my_template.tpl
 
@@ -621,6 +621,8 @@ class TemplateContext(object):
     base_class = StringGenerator
     include_class = StringGenerator
 
+    _context = None
+
     @property
     def template(self):
         '''
@@ -638,6 +640,14 @@ class TemplateContext(object):
         if self.parent:
             return self.parent.template
         return self.owned_template
+
+    @property
+    def context(self):
+        if self.parent:
+            return self.parent.context
+        elif self._context is None:
+            self._context = {}
+        return self._context
 
     @property
     def parentmost(self):
@@ -712,7 +722,7 @@ class TemplateContext(object):
             self.rebased = self.manager.get_template(self.rebase).get_context()
             self.rebased.base = self.get_base()
 
-        self.reset() # clean namespace
+        self.reset() # clear namespace
 
     def __enter__(self):
         return self.template
@@ -728,8 +738,9 @@ class TemplateContext(object):
         if not name in self.includes_cache:
             self.includes_cache[name] = self.manager.get_template(name).get_context()
         context = self.includes_cache[name]
-        context.reset()
-        context.update(environ)
+        context.reset(False)
+        context.namespace.update(self.context)
+        context.namespace.update(environ)
         return self.include_class(self.includes_cache[name].template)
 
     def get_block(self, name, **environ):
@@ -745,8 +756,9 @@ class TemplateContext(object):
                     context = child
                     break
         if context:
-            context.reset()
-            context.update(environ)
+            context.reset(False)
+            context.namespace.update(self.context)
+            context.namespace.update(environ)
             return context.block_class(context.blocks[name], context.iter_super, name)
 
     def get_base(self, **environ):
@@ -765,15 +777,21 @@ class TemplateContext(object):
                 context = parent
                 break
         if context:
-            context.reset()
-            context.update(environ)
+            context.reset(False)
+            context.namespace.update(self.context)
+            context.namespace.update(environ)
             return context.blocks[name](local_block_class)
         return ()
 
-    def reset(self):
+    def reset(self, reset_context=True):
         '''
         Clears and repopulate template namespace
+
+        :param bool reset_context: Whether (defaults to True) clean user-defined context vars
+
         '''
+        if reset_context:
+            self.context.clear()
         if self.rebased:
             self.rebased.reset()
         self.namespace.clear()
@@ -787,13 +805,17 @@ class TemplateContext(object):
             "defined": self.namespace.__contains__,
             "get": self.namespace.get,
             "setdefault": self.namespace.setdefault,
+            "context": self.context
             })
 
     def update(self, v):
         '''
         Add given iterable to namespace.
         '''
+        self.context.update(v)
         self.namespace.update(v)
+        for ancestor in self.iter_ancestors():
+            ancestor.update(v)
 
 
 class Template(object):

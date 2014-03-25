@@ -292,6 +292,21 @@ class TestTemplateManager(unittest.TestCase):
         self.assertEqual(self.lines('template'),
             ['', 'First line', '', 'Base template', '', 'Third line', ''])
 
+    def testContext(self):
+        self.manager.templates['base'] = Template('''
+            {{ a }}
+            % block block
+            % end
+            ''', manager=self.manager)
+        self.manager.templates['template'] = Template('''
+            % extends base
+            % block block
+            {{ b }}
+            % end
+            ''', manager=self.manager)
+        self.assertEqual(self.lines('template', {'a':1, 'b':2}),
+            ['', '1', '2', ''])
+
     def testLookup(self):
         with open(os.path.join(self.tmpdir, "testmplate.stpl"), "w") as f:
             f.write('''
