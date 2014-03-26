@@ -643,11 +643,19 @@ class TemplateContext(object):
 
     @property
     def context(self):
+        if self.rebased:
+            return self.rebased.context
         if self.parent:
             return self.parent.context
-        elif self._context is None:
-            self._context = {}
-        return self._context
+        return self.owned_context
+
+    @property
+    def namespace(self):
+        if self.rebased:
+            return self.rebased.namespace
+        if self.parent:
+            return self.parent.namespace
+        return self.owned_namespace
 
     @property
     def parentmost(self):
@@ -685,7 +693,7 @@ class TemplateContext(object):
         '''
         self.pool = pool
         self.manager = manager
-        self.namespace = {}
+
         self.includes_cache = {}
 
         # Relations for rebase
@@ -696,14 +704,18 @@ class TemplateContext(object):
         self.parent = None
         self.child = None
 
-        eval(code, self.namespace)
-        self.owned_template = self.namespace["__template__"]
+        # Inheritance contexts
+        self.owned_context = {}
+        self.owned_namespace = {}
 
-        self.blocks = self.namespace["__blocks__"]
-        self.includes = self.namespace["__includes__"]
+        eval(code, self.owned_namespace)
+        self.owned_template = self.owned_namespace["__template__"]
 
-        self.extends = self.namespace["__extends__"]
-        self.rebase = self.namespace["__rebase__"]
+        self.blocks = self.owned_namespace["__blocks__"]
+        self.includes = self.owned_namespace["__includes__"]
+
+        self.extends = self.owned_namespace["__extends__"]
+        self.rebase = self.owned_namespace["__rebase__"]
 
         if self.manager is None and (self.includes or self.extends or self.rebase):
             raise TemplateContextError("TemplateContext's extends, include and rebase require a template manager.")
@@ -739,8 +751,8 @@ class TemplateContext(object):
             self.includes_cache[name] = self.manager.get_template(name).get_context()
         context = self.includes_cache[name]
         context.reset(False)
-        context.namespace.update(self.context)
-        context.namespace.update(environ)
+        context.owned_namespace.update(self.context)
+        context.owned_namespace.update(environ)
         return self.include_class(self.includes_cache[name].template)
 
     def get_block(self, name, **environ):
@@ -757,8 +769,8 @@ class TemplateContext(object):
                     break
         if context:
             context.reset(False)
-            context.namespace.update(self.context)
-            context.namespace.update(environ)
+            context.owned_namespace.update(self.context)
+            context.owned_namespace.update(environ)
             return context.block_class(context.blocks[name], context.iter_super, name)
 
     def get_base(self, **environ):
@@ -778,8 +790,8 @@ class TemplateContext(object):
                 break
         if context:
             context.reset(False)
-            context.namespace.update(self.context)
-            context.namespace.update(environ)
+            context.owned_namespace.update(self.context)
+            context.owned_namespace.update(environ)
             return context.blocks[name](local_block_class)
         return ()
 
@@ -790,22 +802,22 @@ class TemplateContext(object):
         :param bool reset_context: Whether (defaults to True) clean user-defined context vars
 
         '''
-        if reset_context:
-            self.context.clear()
         if self.rebased:
             self.rebased.reset()
-        self.namespace.clear()
-        self.namespace.update(builtins.__dict__)
-        self.namespace.update({
+        if reset_context:
+            self.context.clear()
+        self.owned_namespace.clear()
+        self.owned_namespace.update(builtins.__dict__)
+        self.owned_namespace.update({
             # Global vars
             "base": self.base,
             # Global functions
             "include": self.get_include,
             "block": self.get_block,
-            "defined": self.namespace.__contains__,
-            "get": self.namespace.get,
-            "setdefault": self.namespace.setdefault,
-            "context": self.context
+            # Namespace methods
+            "defined": self.owned_namespace.__contains__,
+            "get": self.owned_namespace.get,
+            "setdefault": self.owned_namespace.setdefault
             })
 
     def update(self, v):
@@ -814,8 +826,6 @@ class TemplateContext(object):
         '''
         self.context.update(v)
         self.namespace.update(v)
-        for ancestor in self.iter_ancestors():
-            ancestor.update(v)
 
 
 class Template(object):
