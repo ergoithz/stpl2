@@ -645,16 +645,24 @@ class TemplateContext(object):
     def context(self):
         if self.rebased:
             return self.rebased.context
+        return self.base_context
+
+    @property
+    def base_context(self):
         if self.parent:
-            return self.parent.context
+            return self.parent.base_context
         return self.owned_context
 
     @property
     def namespace(self):
         if self.rebased:
             return self.rebased.namespace
+        return self.base_namespace
+
+    @property
+    def base_namespace(self):
         if self.parent:
-            return self.parent.namespace
+            return self.parent.base_namespace
         return self.owned_namespace
 
     @property
@@ -732,7 +740,7 @@ class TemplateContext(object):
 
         if self.rebase:
             self.rebased = self.manager.get_template(self.rebase).get_context()
-            self.rebased.base = self.get_base()
+            self.rebased.base = self.base_class(self.iter_base)
 
         self.reset() # clear namespace
 
@@ -751,7 +759,7 @@ class TemplateContext(object):
             self.includes_cache[name] = self.manager.get_template(name).get_context()
         context = self.includes_cache[name]
         context.reset(False)
-        context.owned_namespace.update(self.context)
+        context.update(self.context)
         context.owned_namespace.update(environ)
         return self.include_class(self.includes_cache[name].template)
 
@@ -773,15 +781,21 @@ class TemplateContext(object):
             context.owned_namespace.update(environ)
             return context.block_class(context.blocks[name], context.iter_super, name)
 
-    def get_base(self, **environ):
+    def iter_base(self, **environ):
         '''
-        Get block iterable based on :py:cvar:block_base
+        Yield from rebased template
         '''
-        return self.base_class(self.base_template)
+        context = self
+        context.reset(False)
+        context.base_context.update(self.context)
+        context.base_namespace.update(self.context)
+        context.base_namespace.update(environ)
+        for chunk in self.base_template():
+            yield chunk
 
     def iter_super(self, name, local_block_class, **environ):
         '''
-        Get nearest parent block generator with given name
+        Yield from parent block generator with given name
         '''
         context = None
         for parent in self.iter_ancestors():
@@ -792,20 +806,20 @@ class TemplateContext(object):
             context.reset(False)
             context.owned_namespace.update(self.context)
             context.owned_namespace.update(environ)
-            return context.blocks[name](local_block_class)
-        return ()
+            for chunk in context.blocks[name](local_block_class(context.iter_super, name, local_block_class)):
+                yield chunk
 
-    def reset(self, reset_context=True):
+    def reset(self, full_reset=True):
         '''
         Clears and repopulate template namespace
 
         :param bool reset_context: Whether (defaults to True) clean user-defined context vars
 
         '''
-        if self.rebased:
-            self.rebased.reset()
-        if reset_context:
-            self.context.clear()
+        if full_reset:
+            if self.rebased:
+                self.rebased.reset()
+            self.base_context.clear()
         self.owned_namespace.clear()
         self.owned_namespace.update(builtins.__dict__)
         self.owned_namespace.update({
@@ -817,7 +831,7 @@ class TemplateContext(object):
             # Namespace methods
             "defined": self.owned_namespace.__contains__,
             "get": self.owned_namespace.get,
-            "setdefault": self.owned_namespace.setdefault
+            "setdefault": self.owned_namespace.setdefault,
             })
 
     def update(self, v):

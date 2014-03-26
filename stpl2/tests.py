@@ -293,19 +293,40 @@ class TestTemplateManager(unittest.TestCase):
             ['', 'First line', '', 'Base template', '', 'Third line', ''])
 
     def testContext(self):
-        self.manager.templates['base'] = Template('''
+        self.manager.templates['base1'] = Template('''
             {{ a }}
-            % block block
-            % end
-            ''', manager=self.manager)
-        self.manager.templates['template'] = Template('''
-            % extends base
             % block block
             {{ b }}
             % end
             ''', manager=self.manager)
-        self.assertEqual(self.lines('template', {'a':1, 'b':2}),
-            ['', '1', '2', ''])
+        self.manager.templates['base2'] = Template('''
+            % extends base1
+            % block block
+            % block.super
+            % end
+            ''', manager=self.manager)
+        self.manager.templates['template'] = Template('''
+            % extends base2
+            % block block
+            % block.super
+            {{ c }}
+            % end
+            ''', manager=self.manager)
+        self.assertEqual(self.lines('template', {'a':1, 'b':2, 'c':3}),
+            ['', '1', '2', '3', ''])
+
+        self.manager.templates['base'] = Template('''
+            {{ a }}
+            {{ str(base) }}
+            {{ c }}
+            ''', manager=self.manager)
+        self.manager.templates['template'] = Template('''
+            % rebase base
+            {{ b }}
+            ''', manager=self.manager)
+        self.assertEqual(self.lines('template', {'a':1, 'b':2, 'c':3}),
+            ['', '1', '', '2', '', '3', ''])
+
 
     def testLookup(self):
         with open(os.path.join(self.tmpdir, "testmplate.stpl"), "w") as f:
