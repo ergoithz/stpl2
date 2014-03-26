@@ -293,6 +293,7 @@ class TestTemplateManager(unittest.TestCase):
             ['', 'First line', '', 'Base template', '', 'Third line', ''])
 
     def testContext(self):
+        # Inheritance
         self.manager.templates['base1'] = Template('''
             {{ a }}
             % block block
@@ -314,10 +315,10 @@ class TestTemplateManager(unittest.TestCase):
             ''', manager=self.manager)
         self.assertEqual(self.lines('template', {'a':1, 'b':2, 'c':3}),
             ['', '1', '2', '3', ''])
-
+        # Rebase
         self.manager.templates['base'] = Template('''
             {{ a }}
-            {{ str(base) }}
+            {{ base }}
             {{ c }}
             ''', manager=self.manager)
         self.manager.templates['template'] = Template('''
@@ -326,7 +327,16 @@ class TestTemplateManager(unittest.TestCase):
             ''', manager=self.manager)
         self.assertEqual(self.lines('template', {'a':1, 'b':2, 'c':3}),
             ['', '1', '', '2', '', '3', ''])
-
+        # Include
+        self.manager.templates['external'] = Template('''
+            {{ a }}
+            ''', manager=self.manager)
+        self.manager.templates['template'] = Template('''
+            % include external
+            {{ b }}
+            ''', manager=self.manager)
+        self.assertEqual(self.lines('template', {'a':1, 'b':2}),
+            ['', '', '1', '2', ''])
 
     def testLookup(self):
         with open(os.path.join(self.tmpdir, "testmplate.stpl"), "w") as f:
