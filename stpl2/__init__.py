@@ -227,6 +227,12 @@ class CodeTranslator(object):
         '''
         return self.tab * self.level
 
+    @property
+    def dopass(self):
+        if self.level == self.minlevel or self.block_stack and self.level == self.block_stack[-1][0]:
+            return "%sif False: yield" % self.indent
+        return "%spass" % self.indent
+
     def yield_string_start(self):
         '''
         :yield basestring: line with string start yield
@@ -285,7 +291,7 @@ class CodeTranslator(object):
         :yield str: line pass if current block is empty
         '''
         if not self.level_touched:
-            yield "%spass" % self.indent
+            yield self.dopass
         self.level -= 1
         self.level_touched = True # level already touched by indent token
         if self.level < self.minlevel:
@@ -387,7 +393,7 @@ class CodeTranslator(object):
                 yield line
         elif group['redent']:
             if not self.level_touched:
-                yield '%spass' % self.indent
+                yield self.dopass
             self.level -= 1
             yield self.indent + lstripped
             if self.check_indent(lstripped):
@@ -510,7 +516,7 @@ class CodeTranslator(object):
         self.level = self.minlevel # Reset level
         if not oneline:
             # empty template, pass
-            yield "%sif False: yield%s" % (self.indent, self.linesep)
+            yield self.dopass + self.linesep
         else:
             for line in self.yield_string_finish():
                 yield line + self.linesep
@@ -524,7 +530,7 @@ class CodeTranslator(object):
                 oneline |= True
                 yield line + self.linesep
             if not oneline:
-                yield "%sif False: yield%s" % (self.indent, self.linesep)
+                yield self.dopass + self.linesep
             yield "__blocks__[%r] = __block__%s" % (name, self.linesep)
 
         # Yield metadata fields

@@ -99,6 +99,12 @@ class TestTemplate(TestTemplateBase):
             '{{\'{{a}}',
             ''])
 
+    def testEmpty(self):
+        self.assertEqual(self.execute(""), "")
+
+        self.assertEqual(self.execute("% block a\n% end"), "")
+
+
     def testInline(self):
         data = self.execute('''
             % if False: pass
