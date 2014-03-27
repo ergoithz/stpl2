@@ -510,7 +510,7 @@ class CodeTranslator(object):
         self.level = self.minlevel # Reset level
         if not oneline:
             # empty template, pass
-            yield "%spass%s" % (self.indent, self.linesep)
+            yield "%sif False: yield%s" % (self.indent, self.linesep)
         else:
             for line in self.yield_string_finish():
                 yield line + self.linesep
@@ -524,7 +524,7 @@ class CodeTranslator(object):
                 oneline |= True
                 yield line + self.linesep
             if not oneline:
-                yield "%spass%s" % (self.indent, self.linesep)
+                yield "%sif False: yield%s" % (self.indent, self.linesep)
             yield "__blocks__[%r] = __block__%s" % (name, self.linesep)
 
         # Yield metadata fields
