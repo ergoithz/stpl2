@@ -14,7 +14,7 @@ Install
 
 Stpl2 is under active development and cannot be considered production-ready, said this, if you're brave enough, you can install using pip from this repo.
 
-.. code-block:: python
+.. code-block:: bash
 
     pip install https://github.com/ergoithz/stpl2.git
 
@@ -31,14 +31,17 @@ Template inheritance
 
 In addition to **include** and **rebase** stuff, Stpl2 allows extends/block based template inheritance like other *bigger* template engines.
 
-   
 base.tpl
+
+::
 
     % block my_block
     My base block content.
     % end
 
 template.tpl
+
+::
 
     % extends base
     % block my_block
@@ -50,6 +53,7 @@ Stream by default
 -----------------
 
 Default template behavior is to stream templates using yielding without worrying about buffering.
+
 In cases when buffering is a must BufferingTemplate can be used inheriting from TemplateManager class and overriding its template_class attribute.
 
   
