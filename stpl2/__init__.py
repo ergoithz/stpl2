@@ -53,7 +53,9 @@ import os.path
 py3k = sys.version > '3'
 if py3k:
     import builtins
+    xrange = range
     iteritems = dict.items
+    itervalues = dict.values
     unicode_prefix = ''
     base_notfounderror = FileNotFoundError
     yield_from_supported = sys.version_info.minor > 2
@@ -62,6 +64,7 @@ if py3k:
 else:
     import __builtin__ as builtins
     iteritems = dict.iteritems
+    itervalues = dict.itervalues
     unicode_prefix = 'u'
     base_notfounderror = IOError
     yield_from_supported = False
@@ -83,6 +86,47 @@ class TemplateNotFoundError(base_notfounderror):
 
 class TemplateValueError(ValueError):
     pass
+
+
+class TemplateRuntimeError(RuntimeError):
+    def __init__(self, error, code=None, lineno=None, pycode=None, pylineno=None):
+        self.error = error
+        self.code = code
+        self.lineno = lineno
+        self.pycode = pycode
+        self.pylineno = pylineno
+
+        context = []
+        if code:
+            cstart = max(lineno-3, 0)
+            context.extend("    %s" % line for line in code[cstart:lineno])
+            context.append(">>> %s" % code[lineno])
+            context.extend("    %s" % line for line in code[lineno+1:lineno+4])
+            message = "in line %d:" % lineno
+        elif pycode:
+            cstart = max(pylineno-3, 0)
+            context.extend("    %s" % line for line in pycode[cstart:pylineno])
+            context.append(">>> %s" % pycode[pylineno])
+            context.extend("    %s" % line for line in pycode[pylineno+1:pylineno+4])
+            message = "in unknown line. Generated code was:\n"
+        else:
+            message = "in unknown line"
+
+        error_name = type(error).__name__
+        error_message = str(error)
+
+        # Error message unification
+        if error_message.endswith("."):
+            message = message.capitalize()
+        elif error_message.strip()[-1].isalnum():
+            message = ", %s" % message
+        elif not error_message.endswith(" "):
+            message = " %s" % message
+
+        error = "%s: %s%s" % (error_name, error_message, message)
+        if context:
+            error = "%s\n%s" % (error, "\n".join(context))
+        RuntimeError.__init__(self, error)
 
 
 class CodeTranslator(object):
@@ -232,6 +276,7 @@ class CodeTranslator(object):
         if self.level == self.minlevel or self.block_stack and self.level == self.block_stack[-1][0]:
             return "%sif False: yield" % self.indent
         return "%spass" % self.indent
+
 
     def yield_string_start(self):
         '''
@@ -505,8 +550,17 @@ class CodeTranslator(object):
         yield "# -*- coding: UTF-8 -*-%s" % self.linesep
         yield "def __template__():%s" % self.linesep
         oneline = False
+        annotated = False
         for self.linenum, line in enumerate(data.splitlines(True)):
+            annotated = False
             for part in self.translate_line(line):
+                if part.endswith(self.linesep):
+                    # needed for annotations, removes extra whitelines
+                    part = part[:-1]
+                if not annotated:
+                    annotated = True
+                    margin = 67 - len(part) - len("%d" % self.linenum)
+                    part += ("#lineno:%d#" % self.linenum).rjust(margin)
                 if self.block_stack:
                     block_line, block_name = self.block_stack[-1]
                     self.block_content[block_name].append(part)
@@ -829,6 +883,8 @@ class TemplateContext(object):
         self.owned_namespace.clear()
         self.owned_namespace.update(builtins.__dict__)
         self.owned_namespace.update({
+            # Ctx reference for debugging
+            "__ctx__": self,
             # Global vars
             "base": self.base,
             # Global functions
@@ -854,6 +910,7 @@ class Template(object):
     '''
     translate_class = CodeTranslator
     template_context_class = TemplateContext
+    lineno_annotation_re = re.compile("^.*#lineno:(?P<lineno>\d+)#$")
 
     @property
     def code(self):
@@ -899,10 +956,72 @@ class Template(object):
 
         :param dict env: environment dictionary
         :yields str: template lines as string
+        :raise TemplateRuntimeError: on any template exception.
         '''
-        with self.get_context(env) as render_func:
-            for line in render_func():
-                yield line
+        context = self.get_context(env)
+        with context as render_func:
+            try:
+
+                for line in render_func():
+                    yield line
+            except BaseException as e:
+                type, value, traceback = sys.exc_info()
+
+                # Get exception template context
+                tb_next = traceback
+                while tb_next.tb_next:
+                    tb_next = tb_next.tb_next
+                tb_ctx = tb_next.tb_frame.f_globals['__ctx__']
+
+                # Get related template object
+                template = None
+                if tb_ctx is context:
+                    template = self
+                elif self.manager:
+                    # Search for reference recursively
+                    queue = [context]
+                    candidates = {}
+                    while queue:
+                        # Inspect reachable contexts
+                        ctx = queue.pop()
+                        candidates.clear()
+                        if ctx.rebase:
+                            candidates[ctx.rebase] = ctx.rebased
+                        if ctx.extends:
+                            candidates[ctx.extends] = ctx.parent
+                        candidates.update(ctx.includes_cache)
+                        # Check if one of candidates is reference
+                        for name, cctx in iteritems(candidates):
+                            if cctx is tb_ctx:
+                                template = self.manager.get_template(name)
+                                break
+                            queue.append(cctx)
+                        else:
+                            continue
+                        break
+
+                # Generate exception
+                if template:
+                    pycode = template.pycode.splitlines()
+                    pycode_lineno = tb_next.tb_lineno-1
+                    code_lineno = None
+
+                    # Search template line looking at annotations
+                    for lineno in xrange(pycode_lineno, -1, -1):
+                        match = self.lineno_annotation_re.match(pycode[lineno])
+                        if match:
+                            code_lineno = int(match.groupdict()['lineno'], 10)
+                            break
+                    else:
+                        # should not happen
+                        raise TemplateRuntimeError(value,
+                            pycode=pycode, pylineno=pycode_lineno
+                            )
+                    raise TemplateRuntimeError(value,
+                        code=template.code.splitlines(), lineno=code_lineno,
+                        pycode=pycode, pylineno=pycode_lineno
+                        )
+                raise TemplateRuntimeError(value)
 
 
 class BufferingTemplate(Template):

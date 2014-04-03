@@ -101,9 +101,7 @@ class TestTemplate(TestTemplateBase):
 
     def testEmpty(self):
         self.assertEqual(self.execute(""), "")
-
         self.assertEqual(self.execute("% block a\n% end"), "")
-
 
     def testInline(self):
         data = self.execute('''
@@ -351,12 +349,26 @@ class TestTemplateManager(unittest.TestCase):
                 ''')
         self.assertEqual(self.execute("testmplate").strip(), "Simple template")
 
-    def testExceptions(self):
+    def testTemplateNotFoundError(self):
         self.assertRaises(TemplateNotFoundError, self.manager.get_template, "notexistent")
         self.manager.templates['a'] = Template("something", manager=self.manager)
         self.assertEqual(self.execute('a'), "something")
         self.manager.reset()
-        self.assertRaises(TemplateNotFoundError, self.manager.get_template, "a")
+        self.assertRaises(TemplateNotFoundError, self.manager.get_template, 'a')
+
+    def testTemplateRuntimeError(self):
+        self.manager.templates['b'] = Template('% a = b', manager=self.manager)
+        self.assertRaises(TemplateRuntimeError, self.execute, 'b')
+        self.manager.templates['c'] = Template('% extends b', manager=self.manager)
+        self.assertRaises(TemplateRuntimeError, self.execute, 'c')
+        self.manager.templates['d'] = Template('% include b', manager=self.manager)
+        self.assertRaises(TemplateRuntimeError, self.execute, 'd')
+        self.manager.templates['e'] = Template('% rebase b', manager=self.manager)
+        self.assertRaises(TemplateRuntimeError, self.execute, 'e')
+        self.manager.templates['f'] = Template('% extends c', manager=self.manager)
+        self.assertRaises(TemplateRuntimeError, self.execute, 'f')
+        self.manager.templates['g'] = Template('% a<b\n% include c', manager=self.manager)
+        self.assertRaises(TemplateRuntimeError, self.execute, 'g')
 
 
 if __name__ == '__main__':
