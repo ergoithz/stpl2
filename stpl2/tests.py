@@ -87,7 +87,7 @@ class TestTemplate(TestTemplateBase):
             {{ "hello %s" % "world" }}
             {{ "1" }}2{{ "3" }}
             {{ '{{' }} var {{ '}}' }}
-            {{ '{{\\'{{' }}a{{ '}}' }}
+            {{ ! '{{\\'{{' }}a{{ '}}' }}
             ''')
         data = [to_native(i).strip() for i in data.splitlines()]
         self.assertEqual(
@@ -107,7 +107,7 @@ class TestTemplate(TestTemplateBase):
         data = self.execute('''
             % if False: pass
             % for i in "%%%\\"::":
-                {{ i }}
+                {{ ! i }}
             % end
             % if False: # a comment
                 % pass
