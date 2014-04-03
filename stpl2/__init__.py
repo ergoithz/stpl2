@@ -48,11 +48,13 @@ import zlib
 import collections
 import os
 import os.path
+import functools
 
 # Py3k fixes
 py3k = sys.version > '3'
 if py3k:
     import builtins
+    import html
     xrange = range
     iteritems = dict.items
     itervalues = dict.values
@@ -61,8 +63,12 @@ if py3k:
     yield_from_supported = sys.version_info.minor > 2
     maxint = sys.maxsize
     native_string_bases = (str,)
+    tostr = str
+    escape_html = html.escape
 else:
     import __builtin__ as builtins
+    import cgi
+
     iteritems = dict.iteritems
     itervalues = dict.itervalues
     unicode_prefix = 'u'
@@ -70,6 +76,23 @@ else:
     yield_from_supported = False
     maxint = sys.maxint
     native_string_bases = (basestring,)
+
+    def tostr(data):
+        if isinstance(data, native_string_bases):
+            return data
+        return str(data)
+
+    # Backport of html.escape
+    def escape_html(data, quote=True):
+        '''
+        Replace special characters "&", "<" and ">" to HTML-safe sequences.
+        If the optional flag quote is true (the default), the quotation mark
+        characters, both double quote (") and single quote (') characters are also
+        translated.
+        '''
+        if quote:
+            return cgi.escape(data)
+        return cgi.escape(data, quote=True).replace("'", "&apos;")
 
 
 class TemplateSyntaxError(SyntaxError):
@@ -325,9 +348,15 @@ class CodeTranslator(object):
         :return str: positional variable string substitution '%s'
         '''
         group = match.groupdict()
-        if group.get("escape", None):
-            return "%%"
-        self.string_vars.append(group.get("var", ""))
+        if group.get('escape', None):
+            return '%%'
+        var = group.get('var', None)
+        if var is None:
+            return ''
+        var = var.strip()
+        # STPL awful bang ('!') modifier
+        var = var[1:].lstrip() if var[0] == '!' else '_escape(%s)' % var
+        self.string_vars.append(var)
         return "%s"
 
     def translate_token_end(self, params=None):
@@ -885,6 +914,12 @@ class TemplateContext(object):
         self.owned_namespace.update({
             # Ctx reference for debugging
             "__ctx__": self,
+            # Backwards-compatible ugly vars
+            "_stdout": None,
+            "_printlist": None,
+            "_rebase": None,
+            "_str": tostr,
+            "_escape": escape_html_safe,
             # Global vars
             "base": self.base,
             # Global functions
@@ -1131,7 +1166,7 @@ def ensure_set(obj):
     Ensure given object is correctly converted to a set.
 
     :param obj: any python object
-    :return: set containing obj or elements from obj if non-string iterable.
+    :return set: set containing obj or elements from obj if non-string iterable.
     '''
     if obj is None:
         return set()
@@ -1140,3 +1175,13 @@ def ensure_set(obj):
     elif not isinstance(obj, set):
         return set(obj)
     return obj
+
+
+def escape_html_safe(obj):
+    '''
+    Parse given data to string and apply escape_html
+
+    :param obj: any python object
+    :return str: escaped html string
+    '''
+    return escape_html(tostr(obj))
