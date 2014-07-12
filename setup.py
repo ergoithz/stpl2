@@ -28,9 +28,10 @@ except ImportError:
 
 
 setup(
-    name='Stpl2',
-    version='0.1-dev',
+    name='stpl2',
+    version='0.2',
     url='https://github.com/ergoithz/stpl2',
+    download_url = 'https://github.com/ergoithz/stpl2/tarball/0.2',
     license='MIT',
     author='Felipe A. Hernandez',
     author_email='ergoithz@gmail.com',
@@ -45,6 +46,7 @@ setup(
         'Programming Language :: Python :: 3',
         'Topic :: Software Development :: Libraries :: Python Modules'
     ],
+    keywords = ['template', 'engine'],
     packages=['stpl2'],
     include_package_data=True,
     test_suite='stpl2.tests',
