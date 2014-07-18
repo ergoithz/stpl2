@@ -6,7 +6,7 @@ import tempfile
 import shutil
 import os.path
 
-from . import *
+from .internal import *
 
 if py3k:
     xrange = range
