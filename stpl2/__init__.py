@@ -51,5 +51,5 @@ from .internal import (
     )
 
 __app__ = 'stpl2'
-__version__ = 0.3
+__version__ = '0.2.1'
 __author__ = 'Felipe A. Hernandez <ergoithz@gmail.com>'

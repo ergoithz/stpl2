@@ -26,10 +26,12 @@ try:
 except ImportError:
     from distutils.core import setup
 
+from stpl2 import __version__
+
 
 setup(
     name='stpl2',
-    version='0.2',
+    version=__version__,
     url='https://github.com/ergoithz/stpl2',
     download_url = 'https://github.com/ergoithz/stpl2/tarball/0.2',
     license='MIT',
