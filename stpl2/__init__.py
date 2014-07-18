@@ -50,6 +50,19 @@ import os
 import os.path
 import functools
 
+__app__ = 'stpl2'
+__version__ = 0.3
+__author__ = 'Felipe A. Hernandez <ergoithz@gmail.com>'
+__all__ = (
+    # Public classes
+    'BufferingTemplate', 'Template', 'TemplateManager',
+    # Exceptions
+    'TemplateContextError', 'TemplateNotFoundError', 'TemplateRuntimeError',
+    'TemplateSyntaxError', 'TemplateValueError',
+    # Public functions
+    'escape_html_safe',
+    )
+
 # Py3k fixes
 py3k = sys.version > '3'
 if py3k:
@@ -64,11 +77,18 @@ if py3k:
     maxint = sys.maxsize
     native_string_bases = (str,)
     tostr = str
-    escape_html = html.escape
+
+    def escape_html_safe(data):
+        '''
+        Parse given data to string and apply escape_html
+
+        :param obj: any python object
+        :return str: escaped html string
+        '''
+        return html.escape('%s' % data)
 else:
     import __builtin__ as builtins
     import cgi
-
     iteritems = dict.iteritems
     itervalues = dict.itervalues
     unicode_prefix = 'u'
@@ -78,21 +98,16 @@ else:
     native_string_bases = (basestring,)
 
     def tostr(data):
-        if isinstance(data, native_string_bases):
-            return data
-        return str(data)
+        return '%s' % data
 
-    # Backport of html.escape
-    def escape_html(data, quote=True):
+    def escape_html_safe(data):
         '''
-        Replace special characters "&", "<" and ">" to HTML-safe sequences.
-        If the optional flag quote is true (the default), the quotation mark
-        characters, both double quote (") and single quote (') characters are also
-        translated.
+        Parse given data to string and apply escape_html
+
+        :param obj: any python object
+        :return str: escaped html string
         '''
-        if quote:
-            return cgi.escape(data)
-        return cgi.escape(data, quote=True).replace("'", "&apos;")
+        return cgi.escape('%s' % data, quote=True).replace("'", "&apos;")
 
 
 class TemplateSyntaxError(SyntaxError):
@@ -580,7 +595,7 @@ class CodeTranslator(object):
         yield "def __template__():%s" % self.linesep
         oneline = False
         annotated = False
-        for self.linenum, line in enumerate(data.splitlines(True)):
+        for self.linenum, line in enumerate(data.splitlines(True), 1):
             annotated = False
             for part in self.translate_line(line):
                 if part.endswith(self.linesep):
@@ -609,7 +624,7 @@ class CodeTranslator(object):
         for name, lines in iteritems(self.block_content):
             yield "def __block__(block):%s" % self.linesep
             oneline = False
-            for linenum, line in enumerate(lines):
+            for linenum, line in enumerate(lines, 1):
                 oneline |= True
                 yield line + self.linesep
             if not oneline:
@@ -652,18 +667,17 @@ class StringGenerator(object):
     Generic generator wrapper which receives a generator factory function and
     arguments and allows iteration.
     '''
-    @classmethod
-    def _none(self):
-        return ()
+    __slots__ = ('_iterfunc', '_args', '_kwargs')
 
     def __init__(self, iterfunc=None, *args, **kwargs):
-        self._iterfunc = self._none if iterfunc is None else iterfunc
+        self._iterfunc = iterfunc
         self._args = args
         self._kwargs = kwargs
 
     def __iter__(self):
-        for line in self._iterfunc(*self._args, **self._kwargs):
-            yield line
+        if self._iterfunc:
+            return self._iterfunc(*self._args, **self._kwargs)
+        return ()
 
     def __str__(self):
         return "".join(self)
@@ -673,6 +687,8 @@ class LocalBlockGenerator(StringGenerator):
     '''
     Block context variable inside blocks
     '''
+    __slots__ = ('super',)
+
     def __init__(self, superfunc, *args, **kwargs):
         StringGenerator.__init__(self)
         self.super = StringGenerator(superfunc, *args, **kwargs)
@@ -682,6 +698,8 @@ class BlockGenerator(StringGenerator):
     '''
     Object retrieved by block function
     '''
+    __slots__ = ('_name', '_superfunc')
+
     local_block_class = LocalBlockGenerator
 
     @property
@@ -695,8 +713,7 @@ class BlockGenerator(StringGenerator):
 
     def __iter__(self):
         local_block = self.local_block_class(self._superfunc, self._name, self.local_block_class)
-        for line in self._iterfunc(local_block):
-            yield line
+        return self._iterfunc(local_block)
 
 
 class TemplateContext(object):
@@ -831,10 +848,32 @@ class TemplateContext(object):
             self.rebased = self.manager.get_template(self.rebase).get_context()
             self.rebased.base = self.base_class(self.iter_base)
 
+        self.builtins = {}
+        self.builtins.update(builtins.__dict__)
+        self.builtins.update({
+            # Ctx reference for debugging
+            "__ctx__": self,
+            # Backwards-compatible ugly vars
+            "_stdout": None,
+            "_printlist": None,
+            "_rebase": None,
+            "_str": tostr,
+            "_escape": escape_html_safe,
+            # Global vars
+            "base": self.base,
+            # Global functions
+            "include": self.get_include,
+            "block": self.get_block,
+            # Namespace methods
+            "defined": self.owned_namespace.__contains__,
+            "get": self.owned_namespace.get,
+            "setdefault": self.owned_namespace.setdefault,
+            })
+
         self.reset() # clear namespace
 
     def __enter__(self):
-        return self.template
+        pass
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         self.reset()
@@ -879,8 +918,7 @@ class TemplateContext(object):
         context.base_context.update(self.context)
         context.base_namespace.update(self.context)
         context.base_namespace.update(environ)
-        for chunk in self.base_template():
-            yield chunk
+        return self.base_template()
 
     def iter_super(self, name, local_block_class, **environ):
         '''
@@ -895,8 +933,8 @@ class TemplateContext(object):
             context.reset(False)
             context.owned_namespace.update(self.context)
             context.owned_namespace.update(environ)
-            for chunk in context.blocks[name](local_block_class(context.iter_super, name, local_block_class)):
-                yield chunk
+            return context.blocks[name](local_block_class(context.iter_super, name, local_block_class))
+        return ()
 
     def reset(self, full_reset=True):
         '''
@@ -910,26 +948,7 @@ class TemplateContext(object):
                 self.rebased.reset()
             self.base_context.clear()
         self.owned_namespace.clear()
-        self.owned_namespace.update(builtins.__dict__)
-        self.owned_namespace.update({
-            # Ctx reference for debugging
-            "__ctx__": self,
-            # Backwards-compatible ugly vars
-            "_stdout": None,
-            "_printlist": None,
-            "_rebase": None,
-            "_str": tostr,
-            "_escape": escape_html_safe,
-            # Global vars
-            "base": self.base,
-            # Global functions
-            "include": self.get_include,
-            "block": self.get_block,
-            # Namespace methods
-            "defined": self.owned_namespace.__contains__,
-            "get": self.owned_namespace.get,
-            "setdefault": self.owned_namespace.setdefault,
-            })
+        self.owned_namespace.update(self.builtins)
 
     def update(self, v):
         '''
@@ -943,32 +962,22 @@ class Template(object):
     '''
     Template class using a template context-function pool for thread-safety.
     '''
+
     translate_class = CodeTranslator
     template_context_class = TemplateContext
     lineno_annotation_re = re.compile("^.*#lineno:(?P<lineno>\d+)#$")
 
     @property
-    def code(self):
-        return self._code
-
-    @property
     def pycode(self):
         return zlib.decompress(self._pycode).decode("utf-8")
 
-    @property
-    def manager(self):
-        return self._manager
-
-    @property
-    def filename(self):
-        return self._filename
-
     def __init__(self, code, filename=None, manager=None):
-        self._filename = filename
-        self._manager = manager
+        self.filename = filename
+        self.manager = manager
+        self.code = code
 
         pycode = "".join(self.translate_class().translate_code(code))
-        self._code = code
+
         self._pycode = zlib.compress(pycode.encode("utf-8"))
         self._pycompiled = compile(pycode, filename or "<template>", "exec")
         self._pool = []
@@ -980,7 +989,7 @@ class Template(object):
         if self._pool:
             context = self._pool.pop()
         else:
-            context = self.template_context_class(self._pycompiled, self._pool, self._manager)
+            context = self.template_context_class(self._pycompiled, self._pool, self.manager)
         if env:
             context.update(env)
         return context
@@ -994,10 +1003,9 @@ class Template(object):
         :raise TemplateRuntimeError: on any template exception.
         '''
         context = self.get_context(env)
-        with context as render_func:
+        with context:
             try:
-
-                for line in render_func():
+                for line in context.template():
                     yield line
             except BaseException as e:
                 type, value, traceback = sys.exc_info()
@@ -1006,7 +1014,9 @@ class Template(object):
                 tb_next = traceback
                 while tb_next.tb_next:
                     tb_next = tb_next.tb_next
-                tb_ctx = tb_next.tb_frame.f_globals['__ctx__']
+                tb_ctx = tb_next.tb_frame.f_globals.get('__ctx__')
+                if tb_ctx is None:
+                    raise
 
                 # Get related template object
                 template = None
@@ -1150,9 +1160,7 @@ class TemplateManager(object):
         :param dict env: optional variable dictionary
         :yield str: string with lines from rendered template
         '''
-        template = self.get_template(name)
-        for line in template.render(env):
-            yield line
+        return self.get_template(name).render(env)
 
     def reset(self):
         '''
@@ -1175,13 +1183,3 @@ def ensure_set(obj):
     elif not isinstance(obj, set):
         return set(obj)
     return obj
-
-
-def escape_html_safe(obj):
-    '''
-    Parse given data to string and apply escape_html
-
-    :param obj: any python object
-    :return str: escaped html string
-    '''
-    return escape_html(tostr(obj))
