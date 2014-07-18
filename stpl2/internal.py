@@ -811,8 +811,6 @@ class TemplateContext(object):
             "_rebase": None,
             "_str": tostr,
             "_escape": escape_html_safe,
-            # Global vars
-            "base": self.base,
             # Global functions
             "include": self.get_include,
             "block": self.get_block,
@@ -820,6 +818,8 @@ class TemplateContext(object):
             "defined": self.owned_namespace.__contains__,
             "get": self.owned_namespace.get,
             "setdefault": self.owned_namespace.setdefault,
+            # Updated-later vars
+            "base": None,
             })
 
         self.reset()
@@ -894,6 +894,7 @@ class TemplateContext(object):
             self.base_context.clear()
         self.owned_namespace.clear()
         self.owned_namespace.update(self.builtins)
+        self.owned_namespace['base'] = self.base
 
     def update(self, v):
         '''
