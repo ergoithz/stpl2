@@ -13,14 +13,6 @@ Stpl2
   :target: https://pypi.python.org/pypi/stpl2/
   :alt: Latest Version
 
-.. image:: https://pypip.in/egg/stpl2/badge.png
-  :target: https://pypi.python.org/pypi/stpl2/
-  :alt: Egg Status
-
-.. image:: https://pypip.in/wheel/stpl2/badge.png
-  :target: https://pypi.python.org/pypi/stpl2/
-  :alt: Wheel Status
-
 .. image:: https://pypip.in/license/stpl2/badge.png
   :target: https://pypi.python.org/pypi/stpl2/
   :alt: License
