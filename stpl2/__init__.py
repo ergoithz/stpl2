@@ -10,7 +10,7 @@ Features
 ~~~~~~~~
  * Templates are translated to generator functions (yield from is used if supported).
  * Readable and optimal python code generation.
- * Code block smart collapsing.
+ * Literal block smart collapsing.
  * Supports include and rebase as in bottle.py's SimpleTemplate Engine.
  * Supports extends, block and block.super as in django templates.
  * Near-full tested.
@@ -18,9 +18,10 @@ Features
 Rules
 ~~~~~
  * Lines starting with '%' are translated to python code.
- * Lines starting with '% end' decrement indentation level.
+ * Lines with '% end' decrement indentation level.
  * Code blocks starts with '<%', and ends with '%>'.
  * Variable substitution starts with '{{', and ends with '}}'.
+ * Variables are escaped unless starting with '!' like '{{ ! safe_var }}'.
 
 Usage
 ~~~~~
@@ -31,12 +32,18 @@ example.py
     # -*- coding: UTF-8 -*-
     import stpl2
     manager = stpl2.TemplateManager("my/template/directory")
-    manager.render("my_template", {"some":1,"vars":2})
+    output = manager.render("my_template", {"number":2, "things": "variables"})
+    print(output)
 
 my_template.tpl
 
-    This is sort of template.
-    With {{ some }} {{ vars }}.
+    This my template.
+    With {{ number }} {{ things }}.
+
+output
+
+    This is my template.
+    With 2 variables.
 
 '''
 
