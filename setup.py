@@ -26,21 +26,21 @@ try:
 except ImportError:
     from distutils.core import setup
 
-from stpl2 import __version__
+from stpl2 import __version__, __license__
 
 
 setup(
     name='stpl2',
     version=__version__,
     url='https://github.com/ergoithz/stpl2',
-    download_url = 'https://github.com/ergoithz/stpl2/tarball/0.2',
-    license='MIT',
+    download_url = 'https://github.com/ergoithz/stpl2/tarball/0.2.1',
+    license=__license__,
     author='Felipe A. Hernandez',
     author_email='ergoithz@gmail.com',
     description='Fast and pythonic template engine',
     long_description=__doc__,
     classifiers=[
-        'Development Status :: 3 - Alpha',
+        'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',
         'License :: OSI Approved :: MIT License',
         'Operating System :: OS Independent',

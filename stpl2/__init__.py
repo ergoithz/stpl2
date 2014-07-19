@@ -54,9 +54,10 @@ from .internal import (
     TemplateContextError, TemplateNotFoundError, TemplateRuntimeError,
     TemplateSyntaxError, TemplateValueError,
     # Public functions
-    escape_html_safe,
+    escape_html_safe, tostr_safe,
     )
 
-__app__ = 'stpl2'
 __version__ = '0.2.1'
+__license__ = 'MIT'
 __author__ = 'Felipe A. Hernandez <ergoithz@gmail.com>'
+
