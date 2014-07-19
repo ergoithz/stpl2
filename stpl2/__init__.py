@@ -57,7 +57,7 @@ from .internal import (
     escape_html_safe, tostr_safe,
     )
 
-__version__ = '0.2.1'
+__version__ = '0.2.2'
 __license__ = 'MIT'
 __author__ = 'Felipe A. Hernandez <ergoithz@gmail.com>'
 
