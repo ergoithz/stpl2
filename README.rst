@@ -194,7 +194,7 @@ BufferingTemplate can be customized in the same way in order to change the buffe
 
     import stpl2
 
-    class BufferingTemplate(stpl2.Buffering_template):
+    class BufferingTemplate(stpl2.BufferingTemplate):
         buffersize = 3048 # buffering size in bytes
 
     class BufferingTemplateManager(stpl2.TemplateManager):
