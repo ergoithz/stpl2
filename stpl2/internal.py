@@ -28,7 +28,7 @@ if py3k:
     yield_from_supported = sys.version_info.minor > 2
     maxint = sys.maxsize
     native_string_bases = (str,)
-    tostr = str
+    tostr_safe = str
 
     def escape_html_safe(data):
         '''
@@ -49,7 +49,7 @@ else:
     maxint = sys.maxint
     native_string_bases = (basestring,)
 
-    def tostr(data):
+    def tostr_safe(data):
         return '%s' % data
 
     def escape_html_safe(data):
@@ -123,6 +123,9 @@ class CodeTranslator(object):
     '''
     Translate from SimpleTemplate Engine 2 syntax to Python code.
     '''
+    syntax_error_class = TemplateSyntaxError
+    value_error_class = TemplateValueError
+
     tab = "    "
     linesep = "\n"
     literal_open = "<%"
@@ -286,7 +289,9 @@ class CodeTranslator(object):
             self.level_touched = True
             self.first_string_line = True
             if self.string_vars:
-                yield "%s) %% (%s)" % (self.indent, ",".join(self.string_vars))
+                rtup = ", ".join(self.string_vars)
+                suffix = "" if "," in rtup else ","
+                yield "%s) %% (%s%s)" % (self.indent, rtup, suffix)
                 del self.string_vars[:]
             else:
                 yield "%s)" % self.indent
@@ -341,7 +346,7 @@ class CodeTranslator(object):
                 self.level, name = self.block_stack.pop()
             else:
                 # prevent writing lines at module level
-                raise TemplateSyntaxError("Unmatching 'end' token on line %d" % self.linenum)
+                raise self.syntax_error_class("Unmatching 'end' token on line %d" % self.linenum)
 
     def translate_token_extends(self, params=None):
         '''
@@ -349,13 +354,13 @@ class CodeTranslator(object):
         '''
         # extends is managed by template context
         if self.level > self.minlevel or self.block_stack:
-            raise TemplateSyntaxError("Token 'extends' must be outside any block (line %d)." % self.linenum)
+            raise self.syntax_error_class("Token 'extends' must be outside any block (line %d)." % self.linenum)
         elif not self.extends is None:
-            raise TemplateSyntaxError("Token 'extends' cannot be defined twice (line %d)." % self.linenum)
+            raise self.syntax_error_class("Token 'extends' cannot be defined twice (line %d)." % self.linenum)
         args, kwargs, unparsed = self.token_params(params)
         name = kwargs.get("name", args[0] if args else None)
         if name is None:
-            raise TemplateValueError("Token 'extends' receives at least one argument: name (line %d)." % self.linenum)
+            raise self.value_error_class("Token 'extends' receives at least one argument: name (line %d)." % self.linenum)
         self.extends = name
 
     def translate_token_block(self, params=None):
@@ -367,7 +372,7 @@ class CodeTranslator(object):
         args, kwargs, unparsed = self.token_params(params, 1)
         name = kwargs.get("name", args[0] if args else None)
         if name is None:
-            raise TemplateValueError("Token 'block' receives at least one argument: name (line %d)." % self.linenum)
+            raise self.value_error_class("Token 'block' receives at least one argument: name (line %d)." % self.linenum)
         params = ("%r, %s" % (name, unparsed)) if unparsed else repr(name)
         for line in self.yield_from("block(%s)" % params):
             yield line
@@ -382,7 +387,7 @@ class CodeTranslator(object):
         :yield: lines for yielding from parent block
         '''
         if not self.block_stack:
-            raise TemplateSyntaxError("Token 'block.super' outside any block (line %d)" % self.linenum)
+            raise self.syntax_error_class("Token 'block.super' outside any block (line %d)" % self.linenum)
         for line in self.yield_from("block.super"):
             yield line
 
@@ -394,7 +399,7 @@ class CodeTranslator(object):
         args, kwargs, unparsed = self.token_params(params, 1)
         name = kwargs.get("name", args[0] if args else None)
         if name is None:
-            raise TemplateValueError("Token 'include' receives at least one argument: name (line %d)." % self.linenum)
+            raise self.value_error_class("Token 'include' receives at least one argument: name (line %d)." % self.linenum)
         params = ("%r, %s" % (name, unparsed)) if unparsed else repr(name)
         for line in self.yield_from("include(%s)" % params):
             yield line
@@ -408,7 +413,7 @@ class CodeTranslator(object):
         args, kwargs, unparsed = self.token_params(params, 1)
         name = kwargs.get("name", args[0] if args else None)
         if name is None:
-            raise TemplateValueError("Token 'rebase' receives at least one argument: name (line %d)." % self.linenum)
+            raise self.value_error_class("Token 'rebase' receives at least one argument: name (line %d)." % self.linenum)
         self.rebase = name
 
     def translate_token_base(self, params=None):
@@ -457,7 +462,7 @@ class CodeTranslator(object):
             data = self.re_var.sub(self.translate_var, data)
             for i in self.yield_string_start():
                 yield i
-            yield '%s%r' % (self.indent,data)
+            yield '%s%r' % (self.indent, data)
         elif not self.inline:
             for i in self.yield_string_start():
                 yield i
@@ -678,6 +683,9 @@ class TemplateContext(object):
     block_class = BlockGenerator
     base_class = StringGenerator
     include_class = StringGenerator
+    context_error_class = TemplateContextError
+    escape_html = staticmethod(escape_html_safe)
+    tostr = staticmethod(tostr_safe)
 
     _context = None
 
@@ -753,11 +761,10 @@ class TemplateContext(object):
             yield descendant
             descendant = descendant.child
 
-    def __init__(self, code, pool, manager=None):
+    def __init__(self, code, manager=None):
         '''
         Create environment, evaluates given code object and set up context.
         '''
-        self.pool = pool
         self.manager = manager
 
         self.includes_cache = {}
@@ -784,7 +791,7 @@ class TemplateContext(object):
         self.rebase = self.owned_namespace["__rebase__"]
 
         if self.manager is None and (self.includes or self.extends or self.rebase):
-            raise TemplateContextError("TemplateContext's extends, include and rebase require a template manager.")
+            raise self.context_error_class("TemplateContext's extends, include and rebase require a template manager.")
 
         if self.includes:
             self.includes_cache.update(
@@ -798,7 +805,7 @@ class TemplateContext(object):
 
         if self.rebase:
             self.rebased = self.manager.get_template(self.rebase).get_context()
-            self.rebased.base = self.base_class(self.iter_base)
+            self.rebased.builtins['base'] = self.base_class(self.iter_base)
 
         self.builtins = {}
         self.builtins.update(builtins.__dict__)
@@ -809,8 +816,8 @@ class TemplateContext(object):
             "_stdout": None,
             "_printlist": None,
             "_rebase": None,
-            "_str": tostr,
-            "_escape": escape_html_safe,
+            "_str": self.tostr,
+            "_escape": self.escape_html,
             # Global functions
             "include": self.get_include,
             "block": self.get_block,
@@ -818,7 +825,7 @@ class TemplateContext(object):
             "defined": self.owned_namespace.__contains__,
             "get": self.owned_namespace.get,
             "setdefault": self.owned_namespace.setdefault,
-            # Updated-later vars
+            # Updated by related TemplateContexts
             "base": None,
             })
 
@@ -894,7 +901,6 @@ class TemplateContext(object):
             self.base_context.clear()
         self.owned_namespace.clear()
         self.owned_namespace.update(self.builtins)
-        self.owned_namespace['base'] = self.base
 
     def update(self, v):
         '''
@@ -911,6 +917,7 @@ class Template(object):
 
     translate_class = CodeTranslator
     template_context_class = TemplateContext
+    runtime_error_class = TemplateRuntimeError
     lineno_annotation_re = re.compile("^.*#lineno:(?P<lineno>\d+)#$")
 
     @property
@@ -930,12 +937,16 @@ class Template(object):
 
     def get_context(self, env=None):
         '''
-        Generate the new template generator function
+        Generate or retrieve from pool a template context object for
+        thread-safety usage.
+
+        :param dict env: environment dictionary
+        :returns TemplateContext: template context object
         '''
         if self._pool:
             context = self._pool.pop()
         else:
-            context = self.template_context_class(self._pycompiled, self._pool, self.manager)
+            context = self.template_context_class(self._pycompiled, self.manager)
         if env:
             context.update(env)
         return context
@@ -950,6 +961,7 @@ class Template(object):
         '''
         context = self.get_context(env)
         try:
+            # Yielding here for proper error handling
             for line in context.template():
                 yield line
         except BaseException as e:
@@ -1004,14 +1016,14 @@ class Template(object):
                         break
                 else:
                     # should not happen
-                    raise TemplateRuntimeError(value,
+                    raise self.runtime_error_class(value,
                         pycode=pycode, pylineno=pycode_lineno
                         )
-                raise TemplateRuntimeError(value,
+                raise self.runtime_error_class(value,
                     code=template.code.splitlines(), lineno=code_lineno,
                     pycode=pycode, pylineno=pycode_lineno
                     )
-            raise TemplateRuntimeError(value)
+            raise self.runtime_error_class(value)
         finally:
             context.reset()
             self._pool.append(context)
@@ -1061,10 +1073,27 @@ class TemplateManager(object):
     absolutely recommended.
     '''
     template_class = Template
+    notfound_error_class = TemplateNotFoundError
     template_extensions = (".tpl", ".stpl")
 
+    @staticmethod
+    def _ensure_set(obj):
+        '''
+        Ensure given object is correctly converted to a set.
+
+        :param obj: any python object
+        :return set: set containing obj or elements from obj if non-string iterable.
+        '''
+        if obj is None:
+            return set()
+        elif isinstance(obj, native_string_bases):
+            return set((obj,))
+        elif not isinstance(obj, set):
+            return set(obj)
+        return obj
+
     def __init__(self, directories=None):
-        self.directories = ensure_set(directories)
+        self.directories = self._ensure_set(directories)
         self.templates = {}
 
     def get_template(self, name):
@@ -1095,7 +1124,7 @@ class TemplateManager(object):
             elif os.path.exists(name):
                 template_path = name
             if template_path is None:
-                raise TemplateNotFoundError("Template %r not found" % name)
+                raise self.notfound_error_class("Template %r not found" % name)
             with open(template_path) as f:
                 self.templates[name] = Template(f.read(), template_path, self)
         return self.templates[name]
@@ -1115,19 +1144,3 @@ class TemplateManager(object):
         Clear template cache.
         '''
         self.templates.clear()
-
-
-def ensure_set(obj):
-    '''
-    Ensure given object is correctly converted to a set.
-
-    :param obj: any python object
-    :return set: set containing obj or elements from obj if non-string iterable.
-    '''
-    if obj is None:
-        return set()
-    elif isinstance(obj, native_string_bases):
-        return set((obj,))
-    elif not isinstance(obj, set):
-        return set(obj)
-    return obj
