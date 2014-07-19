@@ -3,9 +3,27 @@ Stpl2
 
 .. image:: https://travis-ci.org/ergoithz/stpl2.png?branch=master
   :target: https://travis-ci.org/ergoithz/stpl2
+  :alt: Build status
 
 .. image:: https://coveralls.io/repos/ergoithz/stpl2/badge.png
   :target: https://coveralls.io/r/ergoithz/stpl2
+  :alt: Test coverage
+
+.. image:: https://pypip.in/version/stpl2/badge.png
+  :target: https://pypi.python.org/pypi/stpl2/
+  :alt: Latest Version
+
+.. image:: https://pypip.in/egg/stpl2/badge.png
+  :target: https://pypi.python.org/pypi/stpl2/
+  :alt: Egg Status
+
+.. image:: https://pypip.in/wheel/stpl2/badge.png
+  :target: https://pypi.python.org/pypi/stpl2/
+  :alt: Wheel Status
+
+.. image:: https://pypip.in/license/stpl2/badge.png
+  :target: https://pypi.python.org/pypi/stpl2/
+  :alt: License
 
 Stpl2 is a compatible reimplementation of bottle-py's SimpleTemplate Engine.
 

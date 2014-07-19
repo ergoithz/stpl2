@@ -33,7 +33,7 @@ setup(
     name='stpl2',
     version=__version__,
     url='https://github.com/ergoithz/stpl2',
-    download_url = 'https://github.com/ergoithz/stpl2/tarball/0.2.1',
+    download_url = 'https://github.com/ergoithz/stpl2/tarball/0.2.2',
     license=__license__,
     author='Felipe A. Hernandez',
     author_email='ergoithz@gmail.com',
