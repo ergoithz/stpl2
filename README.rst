@@ -208,6 +208,6 @@ BufferingTemplate can be customized in the same way in order to change the buffe
         buffersize = 3048 # buffering size in bytes
 
     class BufferingTemplateManager(stpl2.TemplateManager):
-        template_class = Buffering_template
+        template_class = BufferingTemplate
 
 
