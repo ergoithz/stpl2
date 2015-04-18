@@ -198,10 +198,39 @@ output
     External line
     Last line
 
+Usage example
+-------------
+
+.. code-block:: python
+  
+    import stpl2
+  
+    manager = stpl2.TemplateManager(directories=['path/to/templates', 'more/templates'])
+    
+    # template lookup
+    template = manager.get_template('template.tpl')
+    
+    # add template from string
+    manager.templates['template2.tpl'] = stpl2.Template('Hello world, {{ name }}.', manager=manager)
+    
+    # rendering generator from manager
+    template_generator = manager.render('template.tpl', {'foo': 'bar'})
+    
+    # rendering generator from template
+    template_generator = template.render({'foo': 'bar'})
+    
+    # render and print template
+    print(''.join(template_generator))
+    
+    # print template code and generated python code (useful for debugging)
+    print(template.code)
+    print(template.pycode)
+
+
 Stream by default
 -----------------
 
-Default template behavior is to stream templates using yielding without worrying about buffering. This approach have been choosen due most wsgi or proxy servers tends to buffer the responses themselves.
+Default template behavior is to stream templates using yield without worrying about buffering. This approach have been choosen due most wsgi or proxy servers tends to buffer the responses themselves.
 
 If buffering is a must for you, BufferingTemplate can be used, inheriting from TemplateManager class and overriding its template_class attribute.
 
