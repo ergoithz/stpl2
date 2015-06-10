@@ -21,8 +21,8 @@ Stpl2
   :target: https://pypi.python.org/pypi/stpl2/
   :alt: Downloads
   
-.. image:: http://img.shields.io/badge/python-2.7+,_3.3+-FFC100.svg?style=flat-square
-  :alt: Python 2.7+, 3.3+
+.. image:: https://img.shields.io/badge/python-2.6%2B%2C%203.3%2B-FFC100.svg?style=flat-square
+  :alt: Python 2.6+, 3.3+
 
 Stpl2 is a compatible reimplementation of bottle-py's SimpleTemplate Engine.
 
