@@ -20,7 +20,7 @@ Stpl2
 .. image:: http://img.shields.io/pypi/dm/stpl2.svg?style=flat-square
   :target: https://pypi.python.org/pypi/stpl2/
   :alt: Downloads
-  
+
 .. image:: https://img.shields.io/badge/python-2.6%2B%2C%203.3%2B-FFC100.svg?style=flat-square
   :alt: Python 2.6+, 3.3+
 
@@ -68,7 +68,7 @@ example.py
 
     manager = stpl2.TemplateManager('template_folder')
     template_iterator = manager.render('template', {'my_var': 'My variable'})
-    teplate_string = ''.join(template_iterator)
+    template_string = ''.join(template_iterator)
     print(template_string)
 
 template.tpl
@@ -254,26 +254,26 @@ Usage example
 -------------
 
 .. code-block:: python
-  
+
     import stpl2
-  
+
     manager = stpl2.TemplateManager(directories=['path/to/templates', 'more/templates'])
-    
+
     # template lookup
     template = manager.get_template('template.tpl')
-    
+
     # add template from string
     manager.templates['template2.tpl'] = stpl2.Template('Hello world, {{ name }}.', manager=manager)
-    
+
     # rendering generator from manager
     template_generator = manager.render('template.tpl', {'foo': 'bar'})
-    
+
     # rendering generator from template
     template_generator = template.render({'foo': 'bar'})
-    
+
     # render and print template
     print(''.join(template_generator))
-    
+
     # print template code and generated python code (useful for debugging)
     print(template.code)
     print(template.pycode)
@@ -308,5 +308,3 @@ Using yield has a side effect, when you want a string you must join the generato
     manager = stpl2.TemplateManager('template_folder')
     template_generator = manager.render("my_template", {"template_variable":2})
     template_string = ''.join(template_iterator)
-
-
