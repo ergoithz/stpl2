@@ -93,7 +93,7 @@ Generated python code
             'Literal line\n'
             '%s\n'                                          #lineno:3#
             ) % (_escape(myvar),)                           #lineno:4#
-        for i in range(5):
+        for i in range(100):
             yield (                                         #lineno:5#
                 '  %s\n'
                 ) % (i,)                                    #lineno:6#
