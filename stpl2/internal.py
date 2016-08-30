@@ -267,7 +267,7 @@ class CodeTranslator(object):
     @property
     def dopass(self):
         if self.level == self.minlevel or self.block_stack and self.level == self.block_stack[-1][0]:
-            return "%sif False: yield" % self.indent
+            return "%sreturn; yield" % self.indent
         return "%spass" % self.indent
 
 
